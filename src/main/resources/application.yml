@@ -1,0 +1,37 @@
+spring:
+  application:
+    name: mark
+  datasource:
+    url: jdbc:h2:file:./mark-workspace/db/markdb;DB_CLOSE_DELAY=-1
+    driverClassName: org.h2.Driver
+    username: sa
+    password:
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+server:
+  port: 8081
+mark:
+  agent:
+    max-steps: 30
+  browser:
+    headless: false
+    timeout-ms: 10000
+  filesystem:
+    base-path: ./mark-workspace
+  llm:
+    active-provider: colab
+    local:
+      base-url: http://127.0.0.1:8080
+      model: local-model
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+logging:
+  level:
+    dev.mark: DEBUG
