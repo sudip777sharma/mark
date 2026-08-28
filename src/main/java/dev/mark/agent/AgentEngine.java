@@ -78,13 +78,17 @@ public class AgentEngine {
 
         saveState(state);
 
+        WorldState worldState = environmentObserver.observe();
+
+        String stateDelta = "No environment changes detected.";
+
         for (int step = 1; step <= properties.maxSteps(); step++) {
-            WorldState worldState = environmentObserver.observe();
+            WorldState previousWorldState = worldState;
             List<LlmMessage> compactedHistory = compactHistory(history, properties);
 
             LlmResponse response;
             try {
-                response = llmProvider.complete(new LlmRequest(request.provider(), systemPromptForExecution(state.plan(), worldState), request.goal(), availableToolDefinitions(), "auto", compactedHistory));
+                response = llmProvider.complete(new LlmRequest(request.provider(), systemPromptForExecution(state.plan(), worldState, stateDelta), request.goal(), availableToolDefinitions(), "auto", compactedHistory));
             } catch (RuntimeException exception) {
                 fail(state, step, "LLM request failed: " + failureMessage(exception));
                 return;
@@ -104,7 +108,12 @@ public class AgentEngine {
                 history.add(LlmMessage.assistantCompletion(completionContent));
                 state.setFinalAnswer(completionContent);
                 state.transitionTo(AgentStatus.VERIFYING);
-                VerificationResult verification = completionVerifier.verify(observations);
+                VerificationResult verification =
+                        completionVerifier.verify(
+                                request.goal(),
+                                completionContent,
+                                observations,
+                                worldState);
                 if (!verification.verified()) {
                     fail(state, step, verification.reason());
                     return;
@@ -156,6 +165,19 @@ public class AgentEngine {
 
             state.transitionTo(AgentStatus.EXECUTING);
             LlmToolObservation observation = executeTool(state, toolCall);
+            WorldState currentWorldState = environmentObserver.observe();
+            WorldStateDelta delta = WorldStateDelta.between(previousWorldState, currentWorldState);
+            stateDelta = formatWorldStateDelta(delta);
+            worldState = currentWorldState;
+            if (delta.hasChanges()) {
+                log.info(
+                        "event=world_state_changed taskId={} application={} -> {} window={} -> {}",
+                        state.taskId(),
+                        delta.previousActiveApplication(),
+                        delta.currentActiveApplication(),
+                        delta.previousActiveWindow(),
+                        delta.currentActiveWindow());
+            }
             observations.add(observation);
             history.add(LlmMessage.toolObservation(observation));
             
@@ -234,9 +256,12 @@ public class AgentEngine {
         return "You are a master planner for an autonomous agent. Break down the user's goal into a sequential, logical list of steps using ONLY the available tools. Keep steps concise and actionable.";
     }
 
-    private String systemPromptForExecution(List<String> plan, WorldState worldState) {
+    private String systemPromptForExecution(List<String> plan, WorldState worldState, String stateDelta) {
         StringBuilder sb = new StringBuilder();
         sb.append("Current Environment:\n");
+        sb.append("Recent Environment Changes:\n");
+        sb.append(stateDelta);
+        sb.append("\n\n");
         sb.append("- Active application: ")
                 .append(worldState.activeApplication())
                 .append("\n");
@@ -316,5 +341,59 @@ public class AgentEngine {
         return lower.contains("rm ") || lower.contains("del ") || lower.contains("format ") 
             || lower.contains("remove-item") || lower.contains("stop-process")
             || lower.contains("restart-computer") || lower.contains("shutdown");
+    }
+
+    private String formatWorldStateDelta(WorldStateDelta delta) {
+        if (!delta.hasChanges()) {
+            return "No environment changes detected.";
+        }
+
+        StringBuilder sb = new StringBuilder();
+
+        if (!java.util.Objects.equals(
+                delta.previousActiveApplication(),
+                delta.currentActiveApplication())) {
+
+            sb.append("- Active application changed from '")
+                    .append(delta.previousActiveApplication())
+                    .append("' to '")
+                    .append(delta.currentActiveApplication())
+                    .append("'\n");
+        }
+
+        if (!java.util.Objects.equals(
+                delta.previousActiveWindow(),
+                delta.currentActiveWindow())) {
+
+            sb.append("- Active window changed from '")
+                    .append(delta.previousActiveWindow())
+                    .append("' to '")
+                    .append(delta.currentActiveWindow())
+                    .append("'\n");
+        }
+
+        if (!java.util.Objects.equals(
+                delta.previousBrowserUrl(),
+                delta.currentBrowserUrl())) {
+
+            sb.append("- Browser URL changed from '")
+                    .append(delta.previousBrowserUrl())
+                    .append("' to '")
+                    .append(delta.currentBrowserUrl())
+                    .append("'\n");
+        }
+
+        if (!java.util.Objects.equals(
+                delta.previousBrowserTitle(),
+                delta.currentBrowserTitle())) {
+
+            sb.append("- Browser title changed from '")
+                    .append(delta.previousBrowserTitle())
+                    .append("' to '")
+                    .append(delta.currentBrowserTitle())
+                    .append("'\n");
+        }
+
+        return sb.toString().trim();
     }
 }

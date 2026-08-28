@@ -22,7 +22,6 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
-import org.mockito.ArgumentCaptor;
 
 class AgentEngineTest {
     @Test void completesAThreeToolMultiStepTaskAndPreservesHistory() {
@@ -226,7 +225,41 @@ class AgentEngineTest {
         AgentEngine agentEngine = engine(provider, 5);
 
         AgentState state =
-                new AgentState(java.util.UUID.randomUUID(), "What application is active?");
+                new AgentState(
+                        java.util.UUID.randomUUID(),
+                        "What application is active?"
+                );
+
+        state.transitionTo(AgentStatus.PLANNING);
+
+        agentEngine.executeTask(
+                state,
+                new TaskRequest("What application is active?", null)
+        );
+        when(provider.complete(any()))
+                .thenReturn(
+                        completion("The active application is test-application.")
+                );
+        verify(provider).complete(any());
+    }
+
+    @Test
+    void rejectsCompletionNotSupportedByWorldState() {
+        LlmProvider provider = mock(LlmProvider.class);
+
+        when(provider.plan(any()))
+                .thenReturn(new PlanResponse(List.of("Read current environment state")));
+
+        when(provider.complete(any()))
+                .thenReturn(completion("The active application is WhatsApp."));
+
+        AgentEngine agentEngine = engine(provider, 5);
+
+        AgentState state =
+                new AgentState(
+                        java.util.UUID.randomUUID(),
+                        "What application is active?"
+                );
 
         state.transitionTo(AgentStatus.PLANNING);
 
@@ -238,4 +271,69 @@ class AgentEngineTest {
         assertEquals(AgentStatus.FAILED, state.status());
     }
 
+    @Test
+    void passesWorldStateDeltaToLlm() {
+        LlmProvider provider = mock(LlmProvider.class);
+
+        WorldState before = new WorldState();
+        before.setActiveApplication("chrome");
+        before.setActiveWindow("Google Chrome");
+
+        WorldState after = new WorldState();
+        after.setActiveApplication("notepad");
+        after.setActiveWindow("Untitled - Notepad");
+
+        EnvironmentObserver observer = mock(EnvironmentObserver.class);
+
+        when(observer.observe())
+                .thenReturn(before, after, after, after);
+
+        when(provider.plan(any()))
+                .thenReturn(new PlanResponse(List.of("Open Notepad")));
+
+        when(provider.complete(any()))
+                .thenReturn(
+                        toolCall("increment", Map.of("value", 1)),
+                        toolCall("finish", Map.of()),
+                        completion("Finished.")
+                );
+
+        AgentEngine engine = new AgentEngine(
+                new ToolRegistry(List.of(new IncrementTool(), new FinishTool())),
+                provider,
+                new CompletionVerifier(),
+                new AgentProperties(5, 6, 20000),
+                mock(dev.mark.task.data.TaskRepository.class),
+                observer
+        );
+
+        AgentState state =
+                new AgentState(
+                        java.util.UUID.randomUUID(),
+                        "Open Notepad"
+                );
+
+        state.transitionTo(AgentStatus.PLANNING);
+
+        engine.executeTask(
+                state,
+                new TaskRequest("Open Notepad", null)
+        );
+
+        ArgumentCaptor<LlmRequest> captor =
+                ArgumentCaptor.forClass(LlmRequest.class);
+
+        verify(provider, times(3)).complete(captor.capture());
+
+        String secondPrompt =
+                captor.getAllValues()
+                        .get(1)
+                        .systemPrompt();
+
+        assertTrue(secondPrompt.contains("Recent Environment Changes:"));
+        assertTrue(secondPrompt.contains(
+                "Active application changed from 'chrome' to 'notepad'"));
+        assertTrue(secondPrompt.contains(
+                "Active window changed from 'Google Chrome' to 'Untitled - Notepad'"));
+    }
 }
