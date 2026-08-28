@@ -18,7 +18,9 @@ import java.util.List;
 import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.springframework.stereotype.Component;
 
+@Component
 public class GeminiLlmProvider implements LlmProvider {
     private static final Logger log = LoggerFactory.getLogger(GeminiLlmProvider.class);
     private final Client client;

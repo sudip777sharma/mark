@@ -22,6 +22,8 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import org.mockito.ArgumentCaptor;
+
 class AgentEngineTest {
     @Test void completesAThreeToolMultiStepTaskAndPreservesHistory() {
         LlmProvider router = mock(LlmProvider.class);
@@ -150,7 +152,22 @@ class AgentEngineTest {
     }
 
     private AgentEngine engine(LlmProvider router, int maxSteps, Tool... tools) {
-        return new AgentEngine(new ToolRegistry(List.of(tools)), router, new CompletionVerifier(), new AgentProperties(maxSteps, 6, 20000), mock(dev.mark.task.data.TaskRepository.class));
+        EnvironmentObserver environmentObserver = mock(EnvironmentObserver.class);
+
+        WorldState worldState = new WorldState();
+        worldState.setActiveApplication("test-application");
+        worldState.setActiveWindow("test-window");
+
+        when(environmentObserver.observe()).thenReturn(worldState);
+
+        return new AgentEngine(
+                new ToolRegistry(List.of(tools)),
+                router,
+                new CompletionVerifier(),
+                new AgentProperties(maxSteps, 6, 20000),
+                mock(dev.mark.task.data.TaskRepository.class),
+                environmentObserver
+        );
     }
 
     private LlmResponse toolCall(String name, Map<String, Object> arguments) {
@@ -160,4 +177,65 @@ class AgentEngineTest {
     private LlmResponse completion(String content) {
         return new LlmResponse(content, "local", false, List.of());
     }
+
+    @Test
+    void passesWorldStateToLlm() {
+        LlmProvider provider = mock(LlmProvider.class);
+
+        when(provider.plan(any()))
+                .thenReturn(new PlanResponse(List.of("finish")));
+
+        when(provider.complete(any()))
+                .thenReturn(completion("done"));
+
+        AgentEngine agentEngine = engine(provider, 5, new FinishTool());
+
+        AgentState state =
+                new AgentState(java.util.UUID.randomUUID(), "test world state");
+
+        state.transitionTo(AgentStatus.PLANNING);
+
+        agentEngine.executeTask(
+                state,
+                new TaskRequest("test world state", null)
+        );
+
+        ArgumentCaptor<LlmRequest> captor =
+                ArgumentCaptor.forClass(LlmRequest.class);
+
+        verify(provider).complete(captor.capture());
+
+        LlmRequest request = captor.getValue();
+
+        assertTrue(request.systemPrompt().contains("Current Environment"));
+        assertTrue(request.systemPrompt().contains("test-application"));
+        assertTrue(request.systemPrompt().contains("test-window"));
+    }
+
+
+    @Test
+    void completesFromWorldStateWithoutToolCall() {
+        LlmProvider provider = mock(LlmProvider.class);
+
+        when(provider.plan(any()))
+                .thenReturn(new PlanResponse(List.of("Read current environment state")));
+
+        when(provider.complete(any()))
+                .thenReturn(completion("The active application is test-application."));
+
+        AgentEngine agentEngine = engine(provider, 5);
+
+        AgentState state =
+                new AgentState(java.util.UUID.randomUUID(), "What application is active?");
+
+        state.transitionTo(AgentStatus.PLANNING);
+
+        agentEngine.executeTask(
+                state,
+                new TaskRequest("What application is active?", null)
+        );
+
+        assertEquals(AgentStatus.FAILED, state.status());
+    }
+
 }

@@ -40,12 +40,15 @@ public class AgentEngine {
     private final AgentProperties properties;
     private final TaskRepository taskRepository;
 
-    public AgentEngine(ToolRegistry toolRegistry, LlmProvider llmProvider, CompletionVerifier completionVerifier, AgentProperties properties, TaskRepository taskRepository) {
+    private final EnvironmentObserver environmentObserver;
+
+    public AgentEngine(ToolRegistry toolRegistry, LlmProvider llmProvider, CompletionVerifier completionVerifier, AgentProperties properties, TaskRepository taskRepository, EnvironmentObserver environmentObserver) {
         this.toolRegistry = toolRegistry;
         this.llmProvider = llmProvider;
         this.completionVerifier = completionVerifier;
         this.properties = properties;
         this.taskRepository = taskRepository;
+        this.environmentObserver = environmentObserver;
     }
 
     public TaskResponse submit(TaskRequest request) {
@@ -76,11 +79,12 @@ public class AgentEngine {
         saveState(state);
 
         for (int step = 1; step <= properties.maxSteps(); step++) {
+            WorldState worldState = environmentObserver.observe();
             List<LlmMessage> compactedHistory = compactHistory(history, properties);
 
             LlmResponse response;
             try {
-                response = llmProvider.complete(new LlmRequest(request.provider(), systemPromptForExecution(state.plan()), request.goal(), availableToolDefinitions(), "auto", compactedHistory));
+                response = llmProvider.complete(new LlmRequest(request.provider(), systemPromptForExecution(state.plan(), worldState), request.goal(), availableToolDefinitions(), "auto", compactedHistory));
             } catch (RuntimeException exception) {
                 fail(state, step, "LLM request failed: " + failureMessage(exception));
                 return;
@@ -230,8 +234,16 @@ public class AgentEngine {
         return "You are a master planner for an autonomous agent. Break down the user's goal into a sequential, logical list of steps using ONLY the available tools. Keep steps concise and actionable.";
     }
 
-    private String systemPromptForExecution(List<String> plan) {
+    private String systemPromptForExecution(List<String> plan, WorldState worldState) {
         StringBuilder sb = new StringBuilder();
+        sb.append("Current Environment:\n");
+        sb.append("- Active application: ")
+                .append(worldState.activeApplication())
+                .append("\n");
+        sb.append("- Active window: ")
+                .append(worldState.activeWindow())
+                .append("\n\n");
+
         sb.append("You are the reasoning component of MARK, an autonomous agent. ");
         sb.append("Select the BEST tool for the task. Available tools:\n");
         for (Tool tool : toolRegistry.availableTools()) {

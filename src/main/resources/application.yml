@@ -26,7 +26,20 @@ mark:
     local:
       base-url: http://127.0.0.1:8080
       model: local-model
-
+    gemini:
+      api-key: "${GEMINI_API_KEY}"
+      model: gemini-3.6-flash
+    groq:
+      base-url: https://api.groq.com/openai
+      api-key: "${GROQ_API_KEY}"
+      model: qwen/qwen3.6-27b
+    openrouter:
+      base-url: "https://openrouter.ai/api/v1",
+        api-key: "${OPENROUTER_API_KEY}"
+      model: "openrouter/free"
+    colab:
+      base-url: https://computer-grab-recommendation-humanitarian.trycloudflare.com
+      model: "qwen2.5vl:7b"
 management:
   endpoints:
     web:
