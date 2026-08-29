@@ -17,18 +17,17 @@ import dev.mark.tool.ToolRegistry;
 import dev.mark.task.data.AgentStepEmbeddable;
 import dev.mark.task.data.TaskEntity;
 import dev.mark.task.data.TaskRepository;
+
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Collectors;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-
-import java.util.concurrent.CompletableFuture;
 
 @Service
 public class AgentEngine {
@@ -56,24 +55,64 @@ public class AgentEngine {
         state.transitionTo(AgentStatus.PLANNING);
         saveState(state);
         log.info("event=task_created taskId={} goal={}", state.taskId(), state.goal());
-        
+
         CompletableFuture.runAsync(() -> executeTask(state, request));
-        
+
         return new TaskResponse(state.taskId(), state.goal(), state.status(), state.finalAnswer(), state.plan(), state.steps());
     }
+    private boolean isDirectResponseGoal(String goal) {
+        if (goal == null || goal.isBlank()) {
+            return false;
+        }
 
+        String normalized = goal.trim().toLowerCase();
+
+        return normalized.startsWith("say exactly:")
+                || normalized.startsWith("say exactly ")
+                || normalized.startsWith("repeat exactly:")
+                || normalized.startsWith("repeat exactly ");
+    }
     void executeTask(AgentState state, TaskRequest request) {
         List<LlmMessage> history = new ArrayList<>();
         List<LlmToolObservation> observations = new ArrayList<>();
-        
-        try {
-            PlanResponse plan = llmProvider.plan(new LlmRequest(request.provider(), systemPromptForPlanning(), request.goal(), availableToolDefinitions(), "auto", List.of()));
-            state.setPlan(plan.steps());
-            state.addStep(new AgentStep(0, "Generated execution plan", "", plan.steps().toString(), "gemini"));
+
+        if (isDirectResponseGoal(request.goal())) {
+            state.setPlan(List.of());
+
+            state.addStep(new AgentStep(
+                    0,
+                    "Direct response task",
+                    "",
+                    "Skipped planning",
+                    llmProvider.name()));
+
             state.transitionTo(AgentStatus.EXECUTING);
-        } catch (RuntimeException exception) {
-            fail(state, 0, "Planning failed: " + failureMessage(exception));
-            return;
+
+        } else {
+            try {
+                PlanResponse plan = llmProvider.plan(new LlmRequest(
+                        request.provider(),
+                        systemPromptForPlanning(),
+                        request.goal(),
+                        availableToolDefinitions(),
+                        "auto",
+                        List.of()));
+
+                state.setPlan(plan.steps());
+
+                state.addStep(new AgentStep(
+                        0,
+                        "Generated execution plan",
+                        "",
+                        plan.steps().toString(),
+                        llmProvider.name()));
+
+                state.transitionTo(AgentStatus.EXECUTING);
+
+            } catch (RuntimeException exception) {
+                fail(state, 0, "Planning failed: " + failureMessage(exception));
+                return;
+            }
         }
 
         saveState(state);
@@ -88,7 +127,17 @@ public class AgentEngine {
 
             LlmResponse response;
             try {
-                response = llmProvider.complete(new LlmRequest(request.provider(), systemPromptForExecution(state.plan(), worldState, stateDelta), request.goal(), availableToolDefinitions(), "auto", compactedHistory));
+                Object toolChoice = isDirectResponseGoal(request.goal()) || step > state.plan().size()
+                        ? "none"
+                        : "required";
+
+                response = llmProvider.complete(new LlmRequest(
+                        request.provider(),
+                        systemPromptForExecution(state.plan(), worldState, stateDelta),
+                        request.goal(),
+                        availableToolDefinitions(),
+                        toolChoice,
+                        compactedHistory));
             } catch (RuntimeException exception) {
                 fail(state, step, "LLM request failed: " + failureMessage(exception));
                 return;
@@ -134,19 +183,19 @@ public class AgentEngine {
             history.add(LlmMessage.assistantToolCall(toolCall));
             state.addStep(new AgentStep(step, "Tool call: " + toolCall.name(), toolCall.name(), toolCall.arguments().toString(), response.provider()));
             saveState(state);
-            
+
             if (toolCall.name().equals("execute_command")) {
                 String cmd = String.valueOf(toolCall.arguments().get("command"));
                 if (isDangerousCommand(cmd)) {
                     state.transitionTo(AgentStatus.NEEDS_INPUT);
                     saveState(state);
                     log.info("event=task_paused_for_approval taskId={} cmd={}", state.taskId(), cmd);
-                    
+
                     CompletableFuture<String> replyFuture = new CompletableFuture<>();
                     PENDING_REPLIES.put(state.taskId(), replyFuture);
                     String userReply = replyFuture.join();
                     PENDING_REPLIES.remove(state.taskId());
-                    
+
                     if (!userReply.trim().equalsIgnoreCase("approve")) {
                         LlmToolObservation obs = new LlmToolObservation(toolCall.id(), toolCall.name(), false, "User rejected the command: " + userReply, Map.of());
                         observations.add(obs);
@@ -156,7 +205,7 @@ public class AgentEngine {
                         saveState(state);
                         continue;
                     }
-                    
+
                     state.transitionTo(AgentStatus.EXECUTING);
                     state.addStep(new AgentStep(step, "User approved command", "", "approve", "user"));
                     saveState(state);
@@ -180,13 +229,13 @@ public class AgentEngine {
             }
             observations.add(observation);
             history.add(LlmMessage.toolObservation(observation));
-            
+
             if (observation.metadata() != null && observation.metadata().containsKey("base64Image")) {
                 String b64 = (String) observation.metadata().get("base64Image");
                 String mime = (String) observation.metadata().get("mimeType");
                 history.add(LlmMessage.userMessageWithImage("Here is the requested image:", b64, mime));
             }
-            
+
             state.transitionTo(AgentStatus.VERIFYING);
             state.addStep(new AgentStep(step, "Record tool observation", toolCall.name(), observation.observation(), "system"));
             log.info("event=tool_observed taskId={} tool={} successful={}", state.taskId(), toolCall.name(), observation.successful());
@@ -197,12 +246,12 @@ public class AgentEngine {
                 state.transitionTo(AgentStatus.NEEDS_INPUT);
                 saveState(state);
                 log.info("event=task_paused taskId={} tool=ask_user", state.taskId());
-                
+
                 CompletableFuture<String> replyFuture = new CompletableFuture<>();
                 PENDING_REPLIES.put(state.taskId(), replyFuture);
                 String userReply = replyFuture.join();
                 PENDING_REPLIES.remove(state.taskId());
-                
+
                 state.transitionTo(AgentStatus.EXECUTING);
                 history.add(LlmMessage.userMessage("User replied: " + userReply));
                 state.addStep(new AgentStep(step, "Received user reply", "", userReply, "user"));
@@ -300,6 +349,7 @@ public class AgentEngine {
     private String failureMessage(RuntimeException exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
+
     private List<LlmMessage> compactHistory(List<LlmMessage> fullHistory, AgentProperties properties) {
         if (fullHistory.isEmpty()) return fullHistory;
 
@@ -338,9 +388,9 @@ public class AgentEngine {
     private boolean isDangerousCommand(String cmd) {
         if (cmd == null) return false;
         String lower = cmd.toLowerCase();
-        return lower.contains("rm ") || lower.contains("del ") || lower.contains("format ") 
-            || lower.contains("remove-item") || lower.contains("stop-process")
-            || lower.contains("restart-computer") || lower.contains("shutdown");
+        return lower.contains("rm ") || lower.contains("del ") || lower.contains("format ")
+                || lower.contains("remove-item") || lower.contains("stop-process")
+                || lower.contains("restart-computer") || lower.contains("shutdown");
     }
 
     private String formatWorldStateDelta(WorldStateDelta delta) {

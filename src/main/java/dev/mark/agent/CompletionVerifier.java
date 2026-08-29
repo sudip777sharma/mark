@@ -15,6 +15,10 @@ public class CompletionVerifier {
             List<LlmToolObservation> observations,
             WorldState worldState) {
 
+        if (completionContent == null || completionContent.isBlank()) {
+            return VerificationResult.failure("Completion is empty");
+        }
+
         boolean hasSuccessfulToolObservation =
                 observations.stream()
                         .anyMatch(LlmToolObservation::successful);
@@ -23,22 +27,36 @@ public class CompletionVerifier {
             return VerificationResult.success();
         }
 
-        if (worldState == null || completionContent == null) {
-            return VerificationResult.failure(
-                    "Completion has no successful tool observation or usable world state");
+        // A direct textual response is valid when no tool was required.
+        if (isDirectResponseGoal(goal)) {
+            return VerificationResult.success();
         }
 
-        if (containsWorldStateValue(completionContent, worldState)) {
+        if (worldState != null && containsWorldStateValue(completionContent, worldState)) {
             return VerificationResult.success();
         }
 
         return VerificationResult.failure(
-                "Completion is not supported by available world state");
+                "Completion is not supported by available evidence");
     }
 
-    private boolean containsWorldStateValue(
-            String completionContent,
-            WorldState worldState) {
+    private boolean isDirectResponseGoal(String goal) {
+        if (goal == null || goal.isBlank()) {
+            return false;
+        }
+
+        String normalized = goal.toLowerCase().trim();
+
+        return normalized.startsWith("say ")
+                || normalized.startsWith("tell me ")
+                || normalized.startsWith("answer ")
+                || normalized.startsWith("what is ")
+                || normalized.startsWith("who is ")
+                || normalized.startsWith("where is ")
+                || normalized.startsWith("when is ");
+    }
+
+    private boolean containsWorldStateValue(String completionContent, WorldState worldState) {
 
         String text = completionContent.toLowerCase();
 

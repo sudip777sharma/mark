@@ -14,7 +14,11 @@ public final class AgentState {
     private List<String> plan = new ArrayList<>();
     private String finalAnswer;
 
-    public AgentState(UUID taskId, String goal) { this.taskId = taskId; this.goal = goal; this.createdAt = Instant.now(); }
+    public AgentState(UUID taskId, String goal) {
+        this.taskId = taskId;
+        this.goal = goal;
+        this.createdAt = Instant.now();
+    }
     public void transitionTo(AgentStatus next) {
         if (status == AgentStatus.COMPLETED || status == AgentStatus.FAILED) throw new IllegalStateException("A terminal task cannot transition");
         status = next;
