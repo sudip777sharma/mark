@@ -8,3 +8,16 @@ target/
 .env.*
 !.env.example
 application-local.yml
+
+# Local runtime state and generated UI artifacts
+mark-workspace/db/
+mark-workspace/screenshots/
+mark-workspace/*.png
+
+# Frontend dependencies and generated build output
+ui/node_modules/
+ui/dist/
+
+# Local source archives
+src.zip
+ui/src.zip
