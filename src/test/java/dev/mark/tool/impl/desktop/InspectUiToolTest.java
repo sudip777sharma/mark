@@ -17,13 +17,13 @@ class InspectUiToolTest {
 
     @BeforeEach
     void setUp() {
-        tool = new InspectUiTool();
+        tool = new InspectUiTool(new com.fasterxml.jackson.databind.ObjectMapper(), new dev.mark.agent.service.ui.UiCacheService());
     }
 
     @Test
     void shouldReturnCorrectMetadata() {
         assertEquals("inspect_ui", tool.name());
-        assertTrue(tool.description().contains("Read the UI element tree"));
+        assertTrue(tool.description().contains("Read the semantic UI element tree"));
 
         Map<String, Object> schema = tool.parameterSchema();
         assertNotNull(schema);

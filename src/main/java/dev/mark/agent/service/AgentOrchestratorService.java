@@ -18,6 +18,8 @@ import dev.mark.task.repository.TaskRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -64,6 +66,7 @@ public class AgentOrchestratorService {
     private final AgentEnvironmentDeltaService deltaService;
     private final AgentToolExecutorService toolExecutor;
     private final ToolRegistry toolRegistry;
+    private final MeterRegistry meterRegistry;
 
     public AgentOrchestratorService(LlmRouterService llmRouter,
                                     TaskRepository taskRepository,
@@ -73,7 +76,7 @@ public class AgentOrchestratorService {
                                     AgentPromptBuilderService promptBuilder,
                                     AgentEnvironmentDeltaService deltaService,
                                     AgentToolExecutorService toolExecutor,
-                                    ToolRegistry toolRegistry) {
+                                    ToolRegistry toolRegistry, MeterRegistry meterRegistry) {
         this.llmRouter = llmRouter;
         this.taskRepository = taskRepository;
         this.environmentObserver = environmentObserver;
@@ -83,6 +86,7 @@ public class AgentOrchestratorService {
         this.deltaService = deltaService;
         this.toolExecutor = toolExecutor;
         this.toolRegistry = toolRegistry;
+        this.meterRegistry = meterRegistry;
     }
 
     public Map<UUID, CompletableFuture<String>> getPendingReplies() {
@@ -91,6 +95,7 @@ public class AgentOrchestratorService {
 
     public TaskResponseDTO executeTask(String taskId, String goal) {
         log.info("event=task_started taskId={}", taskId);
+        Timer.Sample sample = Timer.start(meterRegistry);
 
         AgentStateModel state = new AgentStateModel(taskId, goal);
         state.setStatus("PLANNING");
@@ -107,9 +112,18 @@ public class AgentOrchestratorService {
                 executeNextStep(state);
             }
 
+            if ("COMPLETED".equals(state.status())) {
+                meterRegistry.counter("agent.task.status", "status", "success").increment();
+            } else {
+                meterRegistry.counter("agent.task.status", "status", "failed").increment();
+            }
+
         } catch (Exception e) {
             log.error("!!! [ORCHESTRATOR:FAILED] taskId={} error={}", taskId, e.getMessage(), e);
+            meterRegistry.counter("agent.task.status", "status", "error").increment();
             return handleFailure(state, failureMessage(e));
+        } finally {
+            sample.stop(meterRegistry.timer("agent.task.duration"));
         }
 
         log.info("=== [ORCHESTRATOR:FINISHED] taskId={} status={}", taskId, state.status());
@@ -166,6 +180,32 @@ public class AgentOrchestratorService {
             if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {
                 LlmToolCallDTO toolCall = response.toolCalls().get(0);
 
+                // GUARDRAIL: Loop detection
+                int loopCount = 0;
+                for (int i = state.messages().size() - 1; i >= 0; i--) {
+                    LlmMessageDTO msg = state.messages().get(i);
+                    if ("assistant".equals(msg.role()) && msg.toolCalls() != null && !msg.toolCalls().isEmpty()) {
+                        LlmToolCallDTO prevCall = msg.toolCalls().get(0);
+                        if (prevCall.name().equals(toolCall.name()) && prevCall.arguments().equals(toolCall.arguments())) {
+                            loopCount++;
+                        } else {
+                            break;
+                        }
+                    } else if ("user".equals(msg.role()) && msg.content() != null && msg.content().startsWith("SYSTEM AUTO-OBSERVATION")) {
+                        // ignore auto-observations in between loop checks
+                        continue;
+                    } else if (!"tool".equals(msg.role())) {
+                        break;
+                    }
+                }
+
+                if (loopCount >= 3) {
+                    log.warn("!!! [ORCHESTRATOR:GUARDRAIL] taskId={} Loop detected. Repeated tool call 3 times: {}", state.taskId(), toolCall.name());
+                    meterRegistry.counter("agent.task.status", "status", "guardrail_blocked").increment();
+                    handleFailure(state, "Guardrail triggered: Infinite loop detected for tool " + toolCall.name());
+                    return;
+                }
+
                 LlmMessageDTO assistantMessage = LlmMessageDTO.assistantToolCall(toolCall);
                 state.addMessage(assistantMessage);
 
@@ -180,6 +220,18 @@ public class AgentOrchestratorService {
                 state.addMessage(toolMessage);
 
                 state.addStep(new AgentStepModel(stepNumber, response.content(), toolCall.name(), outcome + ": " + details, response.provider()));
+
+                if (Boolean.TRUE.equals(toolResult.metadata().get("transition_detected"))) {
+                    log.info("--- [ORCHESTRATOR:AUTO_OBSERVE] taskId={} Transition detected, performing automatic inspect_active", state.taskId());
+                    LlmToolCallDTO autoInspectCall = new LlmToolCallDTO("auto-inspect", "inspect_ui", Map.of("action", "inspect_active"));
+                    ToolResultDTO inspectRes = toolExecutor.execute(state.taskId(), autoInspectCall);
+                    LlmMessageDTO autoObserveMsg = LlmMessageDTO.userMessage(
+                        "SYSTEM AUTO-OBSERVATION: A UI transition interrupted your action segment. " +
+                        "Here is the updated semantic UI state:\n" + inspectRes.observation()
+                    );
+                    state.addMessage(autoObserveMsg);
+                }
+
                 saveState(state);
 
             } else {
@@ -251,3 +303,8 @@ public class AgentOrchestratorService {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 }
+
+
+
+
+

@@ -22,13 +22,13 @@ mark:
   filesystem:
     base-path: ./mark-workspace
   llm:
-    active-provider: local
+    active-provider: gemini
     local:
       base-url: "http://127.0.0.1:8080/v1"
       model: "ggml-org/gemma-4-E4B-it-GGUF:Q8_0"
     gemini:
       api-key: "${GEMINI_API_KEY:}"
-      model: gemini-2.5-flash
+      model: gemini-3.6-flash
     groq:
       base-url: https://api.groq.com/openai
       api-key: "${GROQ_API_KEY:}"
@@ -48,3 +48,5 @@ management:
 logging:
   level:
     dev.mark: DEBUG
+
+

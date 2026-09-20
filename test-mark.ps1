@@ -12,7 +12,7 @@ Write-Host ""
 # 1. Create task
 $body = @{
     goal = $Goal
-    provider = "colab"
+    provider = "gemini"
 } | ConvertTo-Json
 
 $response = Invoke-RestMethod `
@@ -48,3 +48,4 @@ Write-Host "TASK RESULT"
 Write-Host "========================================"
 
 $task | ConvertTo-Json -Depth 10
+

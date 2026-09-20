@@ -52,6 +52,10 @@
 
 
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>
+      <dependency>
+        <groupId>io.micrometer</groupId>
+        <artifactId>micrometer-core</artifactId>
+    </dependency>
   </dependencies>
   <build>
     <plugins>
@@ -59,3 +63,5 @@
     </plugins>
   </build>
 </project>
+
+
