@@ -1,9 +1,11 @@
-export type TaskStatus = 'PLANNING' | 'EXECUTING' | 'WAITING_USER' | 'COMPLETED' | 'FAILED';
+export type TaskStatus = 'PLANNING' | 'EXECUTING' | 'WAITING_USER' | 'COMPLETED' | 'FAILED' | 'COOLDOWN' | 'QUOTA_EXHAUSTED';
 
 export interface AgentStep {
-  stepNumber: number;
+  number?: number;
+  stepNumber?: number;
   description: string;
   toolName: string;
+  toolArguments?: string;
   outcome: string;
   provider?: string;
 }
@@ -14,6 +16,7 @@ export interface TaskResponse {
   goal: string;
   status: TaskStatus;
   finalAnswer?: string | null;
+  currentAction?: string | null;
   plan?: string[] | null;
   steps: AgentStep[];
 }
@@ -60,4 +63,4 @@ export interface WorldState {
 }
 
 export type VoiceModeState = 'idle' | 'listening' | 'thinking' | 'speaking';
-export type AppViewMode = 'voice' | 'canvas';
+export type AppViewMode = 'voice' | 'canvas' | 'settings';

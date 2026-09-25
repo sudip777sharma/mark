@@ -2,7 +2,6 @@ package dev.mark.llm.service;
 
 
 
-import dev.mark.llm.config.LlmPropertiesConfig;
 import dev.mark.llm.dto.*;
 import dev.mark.llm.exception.LlmProviderException;
 import com.google.genai.Client;
@@ -40,13 +39,10 @@ import org.springframework.stereotype.Component;
 @Component
 public class GeminiLlmProviderService implements LlmProviderService {
     private static final Logger log = LoggerFactory.getLogger(GeminiLlmProviderService.class);
-    private final Client client;
-    private final LlmPropertiesConfig properties;
+    private final LlmSettingsService llmSettingsService;
 
-    public GeminiLlmProviderService(LlmPropertiesConfig properties) {
-        this.properties = properties;
-        // If API key is empty/null, Client constructor might fail or throw, but that's expected if not configured.
-        this.client = Client.builder().apiKey(properties.apiKey()).build();
+    public GeminiLlmProviderService(LlmSettingsService llmSettingsService) {
+        this.llmSettingsService = llmSettingsService;
     }
 
     @Override
@@ -56,6 +52,21 @@ public class GeminiLlmProviderService implements LlmProviderService {
 
     @Override
     public LlmResponseDTO complete(LlmRequestDTO request) {
+        String configName = request.provider();
+        if (configName == null || configName.isBlank()) {
+            configName = llmSettingsService.getDefaultConfig().map(c -> c.getConfigName()).orElse("gemini");
+        }
+        
+        String finalConfigName = configName;
+        String apiKey = llmSettingsService.getNextApiKey(finalConfigName);
+        String model = llmSettingsService.getConfig(finalConfigName).map(c -> c.getActiveModel()).orElse("gemini-1.5-flash");
+        
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new LlmProviderException("Gemini API key is not configured for: " + finalConfigName);
+        }
+        
+        Client client = Client.builder().apiKey(apiKey).build();
+
         try {
             List<Content> contents = new ArrayList<>();
 
@@ -65,8 +76,20 @@ public class GeminiLlmProviderService implements LlmProviderService {
             }
 
             // Map history
+            List<Part> pendingToolParts = new ArrayList<>();
             for (LlmMessageDTO msg : request.history()) {
-                contents.add(mapMessage(msg));
+                if ("tool".equals(msg.role())) {
+                    pendingToolParts.addAll(mapMessage(msg).parts().orElse(List.of()));
+                } else {
+                    if (!pendingToolParts.isEmpty()) {
+                        contents.add(Content.builder().role("user").parts(pendingToolParts).build());
+                        pendingToolParts = new ArrayList<>();
+                    }
+                    contents.add(mapMessage(msg));
+                }
+            }
+            if (!pendingToolParts.isEmpty()) {
+                contents.add(Content.builder().role("user").parts(pendingToolParts).build());
             }
 
             // Map Tools
@@ -93,14 +116,12 @@ public class GeminiLlmProviderService implements LlmProviderService {
             }
 
             long startTime = System.currentTimeMillis();
-            String promptSnippet = request.userPrompt() != null
-                ? (request.userPrompt().length() > 80 ? request.userPrompt().substring(0, 80) + "..." : request.userPrompt())
-                : (request.history().isEmpty() ? "empty" : "history-context");
+            String promptSnippet = request.userPrompt() != null ? request.userPrompt() : (request.history().isEmpty() ? "empty" : "history-context");
             log.info(">>> [GEMINI:REQ] model={} toolsCount={} historySize={} prompt='{}'",
-                properties.model(), declarations.size(), request.history().size(), promptSnippet);
+                model, declarations.size(), request.history().size(), promptSnippet);
 
             GenerateContentResponse response = client.models.generateContent(
-                properties.model(),
+                model,
                 contents,
                 configBuilder.build()
             );
@@ -108,13 +129,13 @@ public class GeminiLlmProviderService implements LlmProviderService {
             long duration = System.currentTimeMillis() - startTime;
 
             if (response.candidates().isEmpty() || response.candidates().get().isEmpty()) {
-                log.warn("!!! [GEMINI:EMPTY] model={} durationMs={} returned zero candidates", properties.model(), duration);
+                log.warn("!!! [GEMINI:EMPTY] model={} durationMs={} returned zero candidates", model, duration);
                 throw new LlmProviderException("Gemini returned no candidates");
             }
 
             Content bestContent = response.candidates().get().get(0).content().orElse(null);
             if (bestContent == null || bestContent.parts().isEmpty() || bestContent.parts().get().isEmpty()) {
-                log.info("<<< [GEMINI:RES] model={} durationMs={} bestContent is empty", properties.model(), duration);
+                log.info("<<< [GEMINI:RES] model={} durationMs={} bestContent is empty", model, duration);
                 return new LlmResponseDTO("", name(), false);
             }
 
@@ -137,7 +158,7 @@ public class GeminiLlmProviderService implements LlmProviderService {
             }
 
             log.info("<<< [GEMINI:RES] model={} durationMs={} textChars={} toolCallsCount={}",
-                properties.model(), duration, textContent.length(), toolCalls.size());
+                model, duration, textContent.length(), toolCalls.size());
             for (LlmToolCallDTO tc : toolCalls) {
                 log.info("    -> [GEMINI:TOOL_CALL] tool={} args={}", tc.name(), tc.arguments());
             }
@@ -145,21 +166,48 @@ public class GeminiLlmProviderService implements LlmProviderService {
             return new LlmResponseDTO(textContent.toString(), name(), false, toolCalls);
 
         } catch (Exception e) {
-            log.error("!!! [GEMINI:FAILED] model={} error={}", properties.model(), e.getMessage(), e);
+            log.error("!!! [GEMINI:FAILED] model={} error={}", model, e.getMessage(), e);
             throw new LlmProviderException("Gemini request failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()), e);
         }
     }
 
     @Override
     public PlanResponseDTO plan(LlmRequestDTO request) {
+        String configName = request.provider();
+        if (configName == null || configName.isBlank()) {
+            configName = llmSettingsService.getDefaultConfig().map(c -> c.getConfigName()).orElse("gemini");
+        }
+        
+        String finalConfigName = configName;
+        String apiKey = llmSettingsService.getNextApiKey(finalConfigName);
+        String model = llmSettingsService.getConfig(finalConfigName).map(c -> c.getActiveModel()).orElse("gemini-1.5-flash");
+        
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new LlmProviderException("Gemini API key is not configured for: " + finalConfigName);
+        }
+        
+        Client client = Client.builder().apiKey(apiKey).build();
+
         try {
             List<Content> contents = new ArrayList<>();
             if (request.userPrompt() != null && !request.userPrompt().isBlank()) {
                 contents.add(Content.builder().role("user").parts(List.of(Part.builder().text(request.userPrompt()).build())).build());
             }
 
+            List<Part> pendingToolParts = new ArrayList<>();
             for (LlmMessageDTO msg : request.history()) {
-                contents.add(mapMessage(msg));
+                if ("tool".equals(msg.role())) {
+                    pendingToolParts.addAll(mapMessage(msg).parts().orElse(List.of()));
+                } else {
+                    if (!pendingToolParts.isEmpty()) {
+                        contents.add(Content.builder().role("user").parts(pendingToolParts).build());
+                        pendingToolParts = new ArrayList<>();
+                    }
+                    contents.add(mapMessage(msg));
+                }
+            }
+            if (!pendingToolParts.isEmpty()) {
+                contents.add(Content.builder().role("user").parts(pendingToolParts).build());
             }
 
             Schema stringSchema = Schema.builder().type("STRING").build();
@@ -177,10 +225,10 @@ public class GeminiLlmProviderService implements LlmProviderService {
 
             long startTime = System.currentTimeMillis();
             String goalSnippet = request.userPrompt() != null ? request.userPrompt() : "empty-goal";
-            log.info(">>> [GEMINI:PLAN:REQ] model={} goal='{}'", properties.model(), goalSnippet);
+            log.info(">>> [GEMINI:PLAN:REQ] model={} goal='{}'", model, goalSnippet);
 
             GenerateContentResponse response = client.models.generateContent(
-                properties.model(),
+                model,
                 contents,
                 configBuilder.build()
             );
@@ -188,13 +236,13 @@ public class GeminiLlmProviderService implements LlmProviderService {
             long duration = System.currentTimeMillis() - startTime;
 
             if (response.candidates().isEmpty() || response.candidates().get().isEmpty()) {
-                log.warn("!!! [GEMINI:PLAN:EMPTY] model={} durationMs={} returned zero candidates", properties.model(), duration);
+                log.warn("!!! [GEMINI:PLAN:EMPTY] model={} durationMs={} returned zero candidates", model, duration);
                 throw new LlmProviderException("Gemini returned no candidates");
             }
 
             Content bestContent = response.candidates().get().get(0).content().orElse(null);
             if (bestContent == null || bestContent.parts().isEmpty() || bestContent.parts().get().isEmpty()) {
-                log.info("<<< [GEMINI:PLAN:RES] model={} durationMs={} bestContent is empty", properties.model(), duration);
+                log.info("<<< [GEMINI:PLAN:RES] model={} durationMs={} bestContent is empty", model, duration);
                 return new PlanResponseDTO(List.of());
             }
 
@@ -208,14 +256,14 @@ public class GeminiLlmProviderService implements LlmProviderService {
                     steps.add(n.asText());
                 }
             }
-            log.info("<<< [GEMINI:PLAN:RES] model={} durationMs={} stepsCount={}", properties.model(), duration, steps.size());
+            log.info("<<< [GEMINI:PLAN:RES] model={} durationMs={} stepsCount={}", model, duration, steps.size());
             for (int i = 0; i < steps.size(); i++) {
                 log.info("    Step {}: {}", i + 1, steps.get(i));
             }
             return new PlanResponseDTO(steps);
 
         } catch (Exception e) {
-            log.error("!!! [GEMINI:PLAN:FAILED] model={} error={}", properties.model(), e.getMessage(), e);
+            log.error("!!! [GEMINI:PLAN:FAILED] model={} error={}", model, e.getMessage(), e);
             throw new LlmProviderException("Gemini planning request failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()), e);
         }
     }

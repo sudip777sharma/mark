@@ -81,6 +81,17 @@ export function useTaskPoller() {
               speechService.speak('MARK requires your guidance to proceed.');
             }
 
+            // Parse tool arguments into rawPayload for the ToolCallCard to display
+            let parsedArgs: Record<string, unknown> = {};
+            if (step.toolArguments) {
+              try {
+                parsedArgs = JSON.parse(step.toolArguments);
+              } catch (_e) {
+                // If it's not JSON, wrap it as a raw string
+                parsedArgs = { raw: step.toolArguments };
+              }
+            }
+
             addStreamLog({
               id: `${taskId}-step-${step.stepNumber}-${Date.now()}`,
               timestamp: new Date().toLocaleTimeString(),
@@ -88,6 +99,7 @@ export function useTaskPoller() {
               title: step.toolName ? `Tool: ${step.toolName}` : `Step ${step.stepNumber}`,
               detail: step.outcome || step.description,
               toolName: step.toolName,
+              rawPayload: parsedArgs,
               successful:
                 !step.outcome?.toLowerCase().includes('fail') &&
                 !step.outcome?.toLowerCase().includes('error'),

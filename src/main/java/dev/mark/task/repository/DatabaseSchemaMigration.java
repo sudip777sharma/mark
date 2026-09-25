@@ -24,6 +24,8 @@ public class DatabaseSchemaMigration {
             jdbcTemplate.execute("ALTER TABLE IF EXISTS task_steps ALTER COLUMN description TEXT");
             jdbcTemplate.execute("ALTER TABLE IF EXISTS task_steps ALTER COLUMN outcome TEXT");
             jdbcTemplate.execute("ALTER TABLE IF EXISTS task_steps ALTER COLUMN tool_name TEXT");
+            // Bypass H2 strict enum validation which breaks when new enums are added
+            jdbcTemplate.execute("ALTER TABLE IF EXISTS tasks ALTER COLUMN status VARCHAR(255)");
             log.info("Database schema verified: task_steps columns upgraded to TEXT.");
         } catch (Exception e) {
             log.warn("Notice during schema migration: {}", e.getMessage());

@@ -81,7 +81,21 @@ public class AgentIntentRouterService {
         );
 
         try {
-            LlmResponseDTO response = llmRouter.complete(request);
+            LlmResponseDTO response = null;
+            for (int i = 0; i < 5; i++) {
+                try {
+                    response = llmRouter.complete(request);
+                    break;
+                } catch (dev.mark.llm.exception.LlmProviderException e) {
+                    if (e.getMessage() != null && e.getMessage().contains("429")) {
+                        log.warn("--- [INTENT:429] Rate limited on key index {}, rotating...", i);
+                        
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+            if (response == null) throw new dev.mark.llm.exception.LlmProviderException("429 Quota Exhausted across all keys");
             long duration = System.currentTimeMillis() - startTime;
 
             String rawContent = response.content() != null ? response.content().trim() : "";

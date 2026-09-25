@@ -10,6 +10,7 @@ export const TaskSidebar: React.FC = () => {
   const activeTaskId = useAgentStore((s) => s.activeTaskId);
   const setActiveTask = useAgentStore((s) => s.setActiveTask);
   const clearStreamLogs = useAgentStore((s) => s.clearStreamLogs);
+  const setStreamLogs = useAgentStore((s) => s.setStreamLogs);
   const setActivePlan = useAgentStore((s) => s.setActivePlan);
   const setViewMode = useAgentStore((s) => s.setViewMode);
 
@@ -32,7 +33,65 @@ export const TaskSidebar: React.FC = () => {
 
   const handleSelectTask = async (task: TaskResponse) => {
     setActiveTask(task);
-    clearStreamLogs();
+    
+    // Reconstruct stream logs from historical task steps
+    if (task.steps && task.steps.length > 0) {
+      const logs = [];
+      task.steps.forEach((step, idx) => {
+        const stepNum = step.number ?? step.stepNumber ?? (idx + 1);
+        const timeStr = `Step ${stepNum}`;
+        
+        // 1. Agent Reasoning (if present)
+        if (step.description && step.description.trim() !== '') {
+          logs.push({
+            id: `hist-think-${stepNum}`,
+            timestamp: timeStr,
+            type: 'agent:thinking',
+            title: 'Agent Reasoning',
+            detail: step.description
+          });
+        }
+        
+        // 2. Tool Execution
+        if (step.toolName && step.toolName !== 'None') {
+          const isSuccess = step.outcome ? !step.outcome.startsWith('Failed') : true;
+          let parsedArgs = {};
+          if (step.toolArguments) {
+            try {
+              parsedArgs = JSON.parse(step.toolArguments);
+            } catch (e) {}
+          }
+
+          logs.push({
+            id: `hist-tool-${stepNum}`,
+            timestamp: timeStr,
+            type: 'tool:result',
+            title: `Tool: ${step.toolName}`,
+            toolName: step.toolName,
+            detail: step.outcome,
+            successful: isSuccess,
+            rawPayload: parsedArgs 
+          });
+        }
+      });
+      
+      // If task is completed, add a completion log
+      if (task.status === 'COMPLETED') {
+        logs.push({
+          id: `hist-comp-${task.taskId}`,
+          timestamp: 'Final',
+          type: 'task:completed',
+          title: 'Mission Accomplished & Verified',
+          detail: task.finalAnswer || 'Task completed successfully.'
+        });
+      }
+      
+      // @ts-ignore - TS might complain about exact type match depending on imports
+      setStreamLogs(logs);
+    } else {
+      clearStreamLogs();
+    }
+    
     setActivePlan(task.plan || []);
     setViewMode('canvas');
   };

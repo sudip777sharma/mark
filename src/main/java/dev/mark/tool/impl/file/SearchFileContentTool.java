@@ -49,8 +49,8 @@ import org.springframework.stereotype.Component;
 public class SearchFileContentTool implements Tool {
     private final Path basePath;
 
-    public SearchFileContentTool(FileSystemPropertiesConfig properties) {
-        this.basePath = Path.of(properties.basePath()).toAbsolutePath();
+    public SearchFileContentTool(dev.mark.preference.UserPreferenceService userPreferenceService, FileSystemPropertiesConfig properties) {
+        this.basePath = Path.of(userPreferenceService.getString("filesystem.basePath", properties.basePath())).toAbsolutePath();
     }
 
     @Override public String name() { return "search_file_content"; }

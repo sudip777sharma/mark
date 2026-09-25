@@ -16,12 +16,27 @@ export const LiveAgentCanvas: React.FC = () => {
   const streamLogs = useAgentStore((s) => s.streamLogs);
   const activePlan = useAgentStore((s) => s.activePlan);
   const isStreaming = useAgentStore((s) => s.isStreaming);
-
+  
+  const [expandAllSignal, setExpandAllSignal] = React.useState(0);
+  const [collapseAllSignal, setCollapseAllSignal] = React.useState(0);
+  const [cooldownTimer, setCooldownTimer] = React.useState(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [streamLogs]);
+
+  useEffect(() => {
+    if (activeTask?.status === 'COOLDOWN') {
+      setCooldownTimer(60);
+      const interval = setInterval(() => {
+        setCooldownTimer((prev) => (prev > 0 ? prev - 1 : 0));
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setCooldownTimer(0);
+    }
+  }, [activeTask?.status]);
 
   if (!activeTask) {
     return (
@@ -69,6 +84,8 @@ export const LiveAgentCanvas: React.FC = () => {
     WAITING_USER: { color: 'var(--accent-amber)', bg: 'rgba(245, 158, 11, 0.15)' },
     COMPLETED: { color: 'var(--accent-emerald)', bg: 'rgba(16, 185, 129, 0.15)' },
     FAILED: { color: 'var(--accent-rose)', bg: 'rgba(244, 63, 94, 0.15)' },
+    COOLDOWN: { color: '#fb923c', bg: 'rgba(251, 146, 60, 0.15)' }, // Orange
+    QUOTA_EXHAUSTED: { color: '#dc2626', bg: 'rgba(220, 38, 38, 0.15)' }, // Red
   };
 
   const currentStatus = statusColors[activeTask.status] || statusColors.PLANNING;
@@ -138,7 +155,10 @@ export const LiveAgentCanvas: React.FC = () => {
           ) : (
             <CheckCircle2 size={13} />
           )}
-          <span>{activeTask.status}</span>
+          <span>
+            {activeTask.status}
+            {activeTask.status === 'COOLDOWN' && cooldownTimer > 0 && ` (${cooldownTimer}s)`}
+          </span>
         </div>
       </div>
 
@@ -198,11 +218,33 @@ export const LiveAgentCanvas: React.FC = () => {
 
       {/* Live Stream of Events, Thoughts & Tool Executions */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+          <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Execution Trace</span>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button
+              onClick={() => setExpandAllSignal(prev => prev + 1)}
+              className="glass-button"
+              style={{ fontSize: '11px', padding: '4px 8px' }}
+            >
+              Expand All
+            </button>
+            <button
+              onClick={() => setCollapseAllSignal(prev => prev + 1)}
+              className="glass-button"
+              style={{ fontSize: '11px', padding: '4px 8px' }}
+            >
+              Collapse All
+            </button>
+          </div>
+        </div>
+        
         {streamLogs.map((log) => {
           if (log.type === 'tool:invoking' || log.type === 'tool:result') {
             return (
               <ToolCallCard
                 key={log.id}
+                expandAllSignal={expandAllSignal}
+                collapseAllSignal={collapseAllSignal}
                 toolName={log.toolName || 'Tool'}
                 argumentsMap={log.rawPayload}
                 observation={log.detail}
@@ -281,7 +323,7 @@ export const LiveAgentCanvas: React.FC = () => {
                   {log.title}
                 </span>
                 {log.detail && (
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>— {log.detail}</span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>â€” {log.detail}</span>
                 )}
               </div>
               <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
@@ -303,7 +345,7 @@ export const LiveAgentCanvas: React.FC = () => {
             }}
           >
             <Clock size={14} className="animate-spin" />
-            <span>Autonomous agent executing next step...</span>
+            <span>{activeTask?.currentAction || 'Autonomous agent executing next step...'}</span>
           </div>
         )}
 

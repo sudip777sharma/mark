@@ -7,5 +7,7 @@ import jakarta.validation.constraints.NotBlank;
  */
 public record InteractionRequestDTO(
     @NotBlank(message = "User input must not be blank")
-    String input
+    String input,
+    
+    String configName
 ) {}

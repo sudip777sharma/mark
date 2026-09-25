@@ -35,93 +35,32 @@ import org.springframework.stereotype.Component;
 * - plan() and complete(): Execute LLM operations by forwarding requests to the selected provider.
 * - select(): Evaluates the requested provider from the payload or falls back to the default active provider.
 *
-* Integrates into the application logic by abstracting underlying LLM APIs behind a unified interface, allowing controllers to process requests without knowing the concrete AI provider implementation.
 */
-
 @Component
 @Primary
 public class LlmRouterService implements LlmProviderService {
 
     private final GeminiLlmProviderService gemini;
-
-    private final OpenAiCompatibleProviderService colab;
-    private final OpenAiCompatibleProviderService local;
-    private final OpenAiCompatibleProviderService groq;
-    private final OpenAiCompatibleProviderService openrouter;
-
-    private volatile String activeProvider;
+    private final LlmSettingsService llmSettingsService;
+    private final org.springframework.web.client.RestClient.Builder restClientBuilder;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     public LlmRouterService(
             GeminiLlmProviderService gemini,
-
+            LlmSettingsService llmSettingsService,
             org.springframework.web.client.RestClient.Builder restClientBuilder,
-            com.fasterxml.jackson.databind.ObjectMapper objectMapper,
-
-            @Value("${mark.llm.active-provider:colab}") String activeProvider,
-
-            @Value("${mark.llm.colab.base-url:}") String colabBaseUrl,
-            @Value("${mark.llm.colab.model:qwen2.5vl:7b}") String colabModel,
-
-            @Value("${mark.llm.local.base-url:http://127.0.0.1:8080}") String localBaseUrl,
-            @Value("${mark.llm.local.model:local-model}") String localModel,
-
-            @Value("${mark.llm.groq.base-url:}") String groqBaseUrl,
-            @Value("${mark.llm.groq.api-key:}") String groqApiKey,
-            @Value("${mark.llm.groq.model:}") String groqModel,
-
-            @Value("${mark.llm.openrouter.base-url:}") String openrouterBaseUrl,
-            @Value("${mark.llm.openrouter.api-key:}") String openrouterApiKey,
-            @Value("${mark.llm.openrouter.model:}") String openrouterModel) {
-
+            com.fasterxml.jackson.databind.ObjectMapper objectMapper) {
         this.gemini = gemini;
-        this.activeProvider = activeProvider;
-
-        this.colab = new OpenAiCompatibleProviderService(
-                "colab",
-                colabBaseUrl,
-                "",
-                colabModel,
-                restClientBuilder,
-                objectMapper);
-
-        this.local = new OpenAiCompatibleProviderService(
-                "local",
-                localBaseUrl,
-                "",
-                localModel,
-                restClientBuilder,
-                objectMapper);
-
-        this.groq = new OpenAiCompatibleProviderService(
-                "groq",
-                groqBaseUrl,
-                groqApiKey,
-                groqModel,
-                restClientBuilder,
-                objectMapper);
-
-        this.openrouter = new OpenAiCompatibleProviderService(
-                "openrouter",
-                openrouterBaseUrl,
-                openrouterApiKey,
-                openrouterModel,
-                restClientBuilder,
-                objectMapper);
+        this.llmSettingsService = llmSettingsService;
+        this.restClientBuilder = restClientBuilder;
+        this.objectMapper = objectMapper;
     }
 
     @Override
     public String name() {
-        return activeProvider;
-    }
-
-    public String getActiveProvider() {
-        return activeProvider;
-    }
-
-    public void setActiveProvider(String activeProvider) {
-        if (activeProvider != null && !activeProvider.isBlank()) {
-            this.activeProvider = activeProvider.trim().toLowerCase();
-        }
+        return llmSettingsService.getDefaultConfig()
+                .map(c -> c.getConfigName())
+                .orElse("gemini");
     }
 
     @Override
@@ -137,18 +76,25 @@ public class LlmRouterService implements LlmProviderService {
     private LlmProviderService select(LlmRequestDTO request) {
         String requested = request.provider();
 
-        if (requested == null || requested.isBlank()) {
-            requested = activeProvider;
+        if (requested == null || requested.isBlank() || requested.equals("auto")) {
+            requested = name();
         }
 
-        return switch (requested.toLowerCase()) {
-            case "colab" -> colab;
-            case "local" -> local;
-            case "gemini" -> gemini;
-            case "groq" -> groq;
-            case "openrouter" -> openrouter;
-            default -> throw new LlmProviderException(
-                    "Unknown LLM provider: " + requested);
-        };
+        String finalRequested = requested;
+        dev.mark.llm.entity.LlmProviderConfig config = llmSettingsService.getConfig(finalRequested)
+                .orElseThrow(() -> new LlmProviderException("Unknown LLM provider: " + finalRequested));
+
+        if ("GEMINI".equalsIgnoreCase(config.getProviderType())) {
+            return gemini; // Gemini service already handles db key rotation internally
+        } else {
+            return new OpenAiCompatibleProviderService(
+                    config.getConfigName(),
+                    config.getBaseUrl(),
+                    llmSettingsService.getNextApiKey(config.getConfigName()),
+                    config.getActiveModel(),
+                    restClientBuilder,
+                    objectMapper
+            );
+        }
     }
 }

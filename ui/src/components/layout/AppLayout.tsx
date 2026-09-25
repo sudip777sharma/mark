@@ -8,7 +8,8 @@ import { GoalPromptBar } from '../chat/GoalPromptBar';
 import { EnvironmentInspector } from '../inspector/EnvironmentInspector';
 import { HumanInTheLoopModal } from '../stream/HumanInTheLoopModal';
 import { TestLogsDrawer } from '../inspector/TestLogsDrawer';
-import { Mic, LayoutDashboard, Sparkles, FlaskConical } from 'lucide-react';
+import { SettingsView } from '../settings/SettingsView';
+import { Mic, LayoutDashboard, Sparkles, FlaskConical, Settings } from 'lucide-react';
 
 export const AppLayout: React.FC = () => {
   useTaskPoller();
@@ -16,6 +17,17 @@ export const AppLayout: React.FC = () => {
   const setViewMode = useAgentStore((s) => s.setViewMode);
   const isTestMode = useAgentStore((s) => s.isTestMode);
   const setIsTestMode = useAgentStore((s) => s.setIsTestMode);
+
+  React.useEffect(() => {
+    fetch('/api/config/llm')
+      .then(res => res.json())
+      .then(data => {
+        if (!data.activeProvider || data.activeProvider === '') {
+          setViewMode('settings');
+        }
+      })
+      .catch(e => console.error("Could not verify LLM config", e));
+  }, [setViewMode]);
 
   return (
     <div
@@ -125,6 +137,27 @@ export const AppLayout: React.FC = () => {
 
         {/* Right: Test Mode Toggle & Runtime Status */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          
+          <button
+            onClick={() => setViewMode(viewMode === 'settings' ? 'canvas' : 'settings')}
+            title="LLM Settings"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '28px',
+              height: '28px',
+              borderRadius: '6px',
+              background: viewMode === 'settings' ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
+              color: viewMode === 'settings' ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+              border: viewMode === 'settings' ? '1px solid rgba(6, 182, 212, 0.3)' : '1px solid transparent',
+              cursor: 'pointer',
+              transition: 'var(--transition-fast)',
+            }}
+          >
+            <Settings size={16} />
+          </button>
+
           {/* Top Right "Test" Toggle Button */}
           <button
             onClick={() => setIsTestMode(!isTestMode)}
@@ -168,7 +201,9 @@ export const AppLayout: React.FC = () => {
 
       {/* Main View Area */}
       <main style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
-        {viewMode === 'voice' ? (
+        {viewMode === 'settings' ? (
+          <SettingsView />
+        ) : viewMode === 'voice' ? (
           <LiveVoiceHud />
         ) : (
           <div style={{ flex: 1, display: 'flex', height: '100%', width: '100%', overflow: 'hidden' }}>

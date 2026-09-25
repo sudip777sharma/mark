@@ -51,6 +51,7 @@ public class TaskController {
     public TaskResponseDTO createAndRun(@Valid @RequestBody TaskRequestDTO request) {
         UUID taskId = UUID.randomUUID();
         TaskEntity entity = new TaskEntity(taskId, request.goal(), dev.mark.agent.model.AgentStatusModel.PLANNING, null, java.time.Instant.now());
+        entity.setConfigName(request.provider());
         taskRepository.save(entity);
 
         java.util.concurrent.CompletableFuture.runAsync(() -> {
@@ -89,8 +90,8 @@ public class TaskController {
 
     private TaskResponseDTO mapToResponse(TaskEntity entity) {
         List<AgentStepModel> steps = entity.getSteps().stream()
-                .map(s -> new AgentStepModel(s.getStepNumber(), s.getDescription(), s.getToolName(), s.getOutcome(), s.getProvider()))
+                .map(s -> new AgentStepModel(s.getStepNumber(), s.getDescription(), s.getToolName(), s.getToolArguments(), s.getOutcome(), s.getProvider()))
                 .toList();
-        return new TaskResponseDTO(entity.getId(), entity.getGoal(), entity.getStatus(), entity.getFinalAnswer(), entity.getPlan(), steps);
+        return new TaskResponseDTO(entity.getId(), entity.getGoal(), entity.getStatus(), entity.getFinalAnswer(), entity.getCurrentAction(), entity.getPlan(), steps);
     }
 }

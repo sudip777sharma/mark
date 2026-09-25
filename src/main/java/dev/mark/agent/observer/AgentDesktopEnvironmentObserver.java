@@ -42,16 +42,32 @@ public class AgentDesktopEnvironmentObserver implements AgentEnvironmentObserver
                 "environment_observation",
                 Map.of("action", "get_active_window"));
 
-        ToolResultDTO result = inspectUiTool.execute(request);
+        String lastActiveWindow = null;
+        String activeWindow = null;
+        String activeApplication = null;
 
-        if (!result.successful()) {
-            return worldState;
+        for (int i = 0; i < 4; i++) {
+            ToolResultDTO result = inspectUiTool.execute(request);
+            if (!result.successful()) {
+                break;
+            }
+
+            String observation = result.observation();
+            activeWindow = extractValue(observation, "Title:");
+            activeApplication = extractValue(observation, "Process:");
+
+            if (activeWindow != null && activeWindow.equals(lastActiveWindow)) {
+                break; // Window title has stabilized
+            }
+            lastActiveWindow = activeWindow;
+
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
         }
-
-        String observation = result.observation();
-
-        String activeWindow = extractValue(observation, "Title:");
-        String activeApplication = extractValue(observation, "Process:");
 
         worldState.setActiveWindow(activeWindow);
         worldState.setActiveApplication(activeApplication);

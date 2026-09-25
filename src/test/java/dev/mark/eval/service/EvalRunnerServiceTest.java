@@ -30,7 +30,7 @@ class EvalRunnerServiceTest {
     @Test
     void testSuccessfulEvaluation() {
         when(orchestratorService.executeTask(anyString(), eq("Say Hello")))
-                .thenReturn(new TaskResponseDTO(java.util.UUID.randomUUID(), "Say Hello", AgentStatusModel.COMPLETED, "Hello World", List.of(), List.of()));
+                .thenReturn(new TaskResponseDTO(java.util.UUID.randomUUID(), "Say Hello", AgentStatusModel.COMPLETED, "Hello World", "", List.of(), List.of()));
 
         EvalScenarioModel scenario = new EvalScenarioModel("test-1", "Say Hello", "Hello.*");
         List<EvalResultModel> results = evalRunnerService.runEvaluations(List.of(scenario));
@@ -43,7 +43,7 @@ class EvalRunnerServiceTest {
     @Test
     void testFailedEvaluationDueToRegex() {
         when(orchestratorService.executeTask(anyString(), eq("Say Hello")))
-                .thenReturn(new TaskResponseDTO(java.util.UUID.randomUUID(), "Say Hello", AgentStatusModel.COMPLETED, "Goodbye World", List.of(), List.of()));
+                .thenReturn(new TaskResponseDTO(java.util.UUID.randomUUID(), "Say Hello", AgentStatusModel.COMPLETED, "Goodbye World", "", List.of(), List.of()));
 
         EvalScenarioModel scenario = new EvalScenarioModel("test-2", "Say Hello", "Hello.*");
         List<EvalResultModel> results = evalRunnerService.runEvaluations(List.of(scenario));

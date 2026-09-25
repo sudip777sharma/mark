@@ -20,10 +20,10 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record AgentPropertiesConfig(int maxSteps, Integer maxHistoryLength, Integer maxHistoryChars) {
     public AgentPropertiesConfig {
         if (maxHistoryLength == null) {
-            maxHistoryLength = 6;
+            maxHistoryLength = 100;
         }
         if (maxHistoryChars == null) {
-            maxHistoryChars = 20000;
+            maxHistoryChars = 2000000;
         }
     }
 }

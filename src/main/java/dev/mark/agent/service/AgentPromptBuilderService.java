@@ -217,20 +217,42 @@ import java.util.Objects;
 
 @Service
 public class AgentPromptBuilderService {
+    private final dev.mark.preference.UserPreferenceService userPreferenceService;
     private final ToolRegistry toolRegistry;
     private final dev.mark.memory.service.MemoryService memoryService;
 
-    public AgentPromptBuilderService(ToolRegistry toolRegistry, dev.mark.memory.service.MemoryService memoryService) {
+    public AgentPromptBuilderService(dev.mark.preference.UserPreferenceService userPreferenceService, ToolRegistry toolRegistry, dev.mark.memory.service.MemoryService memoryService) {
+        this.userPreferenceService = userPreferenceService;
         this.toolRegistry = toolRegistry;
         this.memoryService = memoryService;
     }
 
-    public String systemPromptForPlanning() {
-        return "You are a master planner for an autonomous agent. Break down the user's goal into a sequential, logical list of steps using ONLY the available tools. Keep steps concise and actionable.";
+        public String systemPromptForPlanning() {
+        return "You are an elite, universally adaptable autonomous agent planner.\n\n" +
+               "PHASE 1: DOMAIN CATEGORIZATION\n" +
+               "Analyze the user's goal and categorize the primary domain (e.g., Desktop UI Automation, File/Code Manipulation, Web Browsing, OS System Tasks). " +
+               "Based on this category, classify which tools are relevant and restrict your planning to them.\n\n" +
+               "PHASE 2: DYNAMIC STRATEGY\n" +
+               "- Do not rely on rigid assumptions. Every environment is dynamic.\n" +
+               "- For Code/File tasks: Prefer 'execute_command' and CLI tools over manual GUI clicks.\n" +
+               "- For GUI tasks: You MUST actively observe the screen. Always use 'inspect_ui' (using 'list_windows' or 'inspect_active') to orient yourself. " +
+               "If an expected element is missing, intelligently deduce what happened (e.g., a modal dialog appeared, a new window took focus) and inspect the active foreground window to adapt.\n\n" +
+               "PHASE 3: ACTIONABLE PLAN\n" +
+               "Break down the goal into a sequential, logical list of steps using ONLY the available tools. Keep steps concise.";
     }
 
-    public String systemPromptForExecution(List<String> plan, AgentWorldStateModel worldState, String stateDelta) {
+            public String systemPromptForExecution(List<String> plan, AgentWorldStateModel worldState, String stateDelta) {
         StringBuilder sb = new StringBuilder();
+        sb.append("You are a super-intelligent execution agent. Execute the plan with extreme adaptability and dynamic problem-solving.\n\n");
+        sb.append("UNIVERSAL EXECUTION GUIDELINES:\n");
+        sb.append("- CATEGORIZE & FILTER: Mentally categorize the current step and only use tools relevant to that domain.\n");
+        sb.append("- VERIFY & ADAPT: Do not blindly execute actions. Verify the environment state before acting. If an action fails, deduce the root cause and adapt.\n\n");
+        sb.append("DESKTOP UI AUTOMATION (CRITICAL RULES):\n");
+        sb.append("- DISCOVERY: NEVER guess coordinates or window titles. Use 'inspect_ui' ('list_windows', 'inspect_active', or 'inspect_window') to read the UI tree.\n");
+        sb.append("- DYNAMIC MODALS: If you open a dialog (like 'Save As'), the OS spawns it as a completely new top-level window. If you can't find an element, use 'inspect_active' to see what is currently blocking the screen.\n");
+        sb.append("- PRECISION INTERACTION: To interact with a UI element, read its BoundingRectangle [x, y, width, height], calculate its exact center point (x + width/2, y + height/2), and use 'desktop_automation' (move, click, type) with those exact integer coordinates.\n");
+        sb.append("- TEXT ENTRY: Prefer using the 'type' or 'press' actions in 'desktop_automation' after clicking to focus an input field. Use 'press' for keyboard shortcuts.\n\n");
+        
         java.util.Map<String, String> memories = memoryService.retrieveAll();
         if (!memories.isEmpty()) {
             sb.append("Long-term Memory:\n");
@@ -258,15 +280,12 @@ public class AgentPromptBuilderService {
         }
         sb.append("\nRules:\n");
         sb.append("- Use ONLY the tools listed above. Never invent tools.\n");
-        sb.append("- Match the task to the most specific tool. For file operations use read_file/write_file/list_directory, for math use calculate, for echoing use echo.\n");
-        sb.append("- Return exactly one tool call when work remains.\n");
+        sb.append("- Match the task to the most specific tool. For file operations use read_file/write_file/list_directory.\n");
+        sb.append("- **BATCHING**: You CAN and SHOULD output multiple tool calls sequentially in a single response to form a segment of steps (e.g., focus -> delay -> click -> delay -> type). Do not wait for intermediate observations if the sequence is deterministic.\n");
         sb.append("- When the task is complete, return a concise final response WITHOUT a tool call.\n");
         sb.append("- Do not claim success before tool results provide evidence.\n");
-        sb.append("- If you perform a desktop_automation action that opens an application or triggers a slow UI update, you MUST use the 'delay' action to wait before taking the next step.\n");
-        sb.append("- If you perform a browser action (navigate, click, type), you MUST verify the result by using browser_read_page or browser_extract before returning COMPLETED.\n");
-        sb.append("- DESKTOP UI WORKFLOW: Before interacting with a native desktop application, ALWAYS use 'inspect_ui' first to discover UI elements and their bounding rectangles.\n");
-        sb.append("- When performing UI operations, use 'desktop_action_segment' to batch multiple actions together sequentially (e.g. click -> wait -> type) to minimize round trips.\n");
-        sb.append("- If inspect_ui fails or returns insufficient data for a UI element, use 'screenshot' as a fallback to capture what is on screen.\n");
+        sb.append("- If you perform a 'desktop_automation' action that opens an application or triggers a slow UI update, you MUST use the 'delay' action to wait before taking the next step.\n");
+        sb.append("- If inspect_ui fails or returns insufficient data, use 'screenshot' as a fallback to capture what is on screen.\n");
 
         if (plan != null && !plan.isEmpty()) {
             sb.append("\nYour Execution Plan:\n");
@@ -283,14 +302,14 @@ public class AgentPromptBuilderService {
         if (fullHistory.isEmpty()) return fullHistory;
 
         List<LlmMessageDTO> compacted = new ArrayList<>(fullHistory);
-        if (properties.maxHistoryLength() != null && compacted.size() > properties.maxHistoryLength()) {
-            compacted = new ArrayList<>(compacted.subList(compacted.size() - properties.maxHistoryLength(), compacted.size()));
+        if (compacted.size() > userPreferenceService.getInt("agent.maxHistoryLength", properties.maxHistoryLength())) {
+            compacted = new ArrayList<>(compacted.subList(compacted.size() - userPreferenceService.getInt("agent.maxHistoryLength", properties.maxHistoryLength()), compacted.size()));
         }
 
-        if (properties.maxHistoryChars() != null) {
+        if (true) {
             while (compacted.size() > 4) {
                 int totalChars = compacted.stream().mapToInt(this::messageLength).sum();
-                if (totalChars <= properties.maxHistoryChars()) {
+                if (totalChars <= userPreferenceService.getInt("agent.maxHistoryChars", properties.maxHistoryChars())) {
                     break;
                 }
                 compacted.removeFirst();

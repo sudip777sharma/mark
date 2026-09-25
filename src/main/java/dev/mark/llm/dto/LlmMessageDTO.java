@@ -28,6 +28,10 @@ public record LlmMessageDTO(String role, String content, String toolCallId, List
         return new LlmMessageDTO("assistant", "", null, List.of(toolCall), null, null, null);
     }
 
+    public static LlmMessageDTO assistantToolCalls(List<LlmToolCallDTO> toolCalls) {
+        return new LlmMessageDTO("assistant", "", null, toolCalls, null, null, null);
+    }
+
     public static LlmMessageDTO toolObservation(LlmToolObservationDTO observation) {
         return new LlmMessageDTO("tool", null, observation.toolCallId(), List.of(), observation, null, null);
     }

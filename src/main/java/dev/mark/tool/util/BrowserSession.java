@@ -49,21 +49,23 @@ public class BrowserSession implements AutoCloseable {
     private static final Logger log = LoggerFactory.getLogger(BrowserSession.class);
 
     private final BrowserPropertiesConfig properties;
+    private final dev.mark.preference.UserPreferenceService userPreferenceService;
     private Playwright playwright;
     private Browser browser;
     private Page currentPage;
 
-    public BrowserSession(BrowserPropertiesConfig properties) {
+    public BrowserSession(dev.mark.preference.UserPreferenceService userPreferenceService, BrowserPropertiesConfig properties) {
+        this.userPreferenceService = userPreferenceService;
         this.properties = properties;
     }
 
     @PostConstruct
     public void init() {
-        log.info("event=browser_init headless={} timeout={}", properties.headless(), properties.timeoutMs());
+        log.info("event=browser_init headless={} timeout={}", userPreferenceService.getBoolean("browser.headless", properties.headless()), userPreferenceService.getInt("browser.timeoutMs", properties.timeoutMs()));
         try {
             this.playwright = Playwright.create();
             BrowserType.LaunchOptions options = new BrowserType.LaunchOptions()
-                    .setHeadless(properties.headless());
+                    .setHeadless(userPreferenceService.getBoolean("browser.headless", properties.headless()));
             this.browser = playwright.chromium().launch(options);
         } catch (Exception e) {
             log.error("event=browser_init_failed", e);
@@ -75,7 +77,7 @@ public class BrowserSession implements AutoCloseable {
         if (this.currentPage == null || this.currentPage.isClosed()) {
             log.debug("event=browser_new_page");
             this.currentPage = browser.newPage();
-            this.currentPage.setDefaultTimeout(properties.timeoutMs());
+            this.currentPage.setDefaultTimeout(userPreferenceService.getInt("browser.timeoutMs", properties.timeoutMs()));
         }
         return this.currentPage;
     }

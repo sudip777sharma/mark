@@ -2,7 +2,6 @@ package dev.mark;
 
 import dev.mark.agent.config.AgentPropertiesConfig;
 import dev.mark.tool.config.BrowserPropertiesConfig;
-import dev.mark.llm.config.LlmPropertiesConfig;
 import dev.mark.tool.config.FileSystemPropertiesConfig;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -45,8 +44,7 @@ import org.springframework.boot.builder.SpringApplicationBuilder;
 @EnableConfigurationProperties({
     AgentPropertiesConfig.class,
     BrowserPropertiesConfig.class,
-    FileSystemPropertiesConfig.class,
-    LlmPropertiesConfig.class
+    FileSystemPropertiesConfig.class
 })
 public class MarkApplication {
     public static void main(String[] args) {

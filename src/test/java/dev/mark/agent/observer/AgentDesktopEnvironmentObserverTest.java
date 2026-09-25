@@ -38,27 +38,22 @@ class AgentDesktopEnvironmentObserverTest {
         assertNull(state.activeWindow());
         assertNull(state.activeApplication());
 
-        verify(inspectUiTool).execute(any(ToolRequestDTO.class));
+        verify(inspectUiTool, org.mockito.Mockito.atLeastOnce()).execute(any(ToolRequestDTO.class));
     }
 
     @Test
     void shouldExtractWindowAndApplicationWhenToolExecutionSucceeds() {
-        // Arrange
-        String observationOutput = "Process: chrome.exe\r\nTitle: GitHub - Mozilla Firefox\r\nOtherData: ignored";
-        ToolResultDTO successResult = new ToolResultDTO(true, observationOutput, Map.of());
-        when(inspectUiTool.execute(any(ToolRequestDTO.class))).thenReturn(successResult);
+        String mockObservation = "Process: chrome.exe\nTitle: GitHub - Mozilla Firefox\nOtherData: ignored";
+        when(inspectUiTool.execute(any(ToolRequestDTO.class)))
+                .thenReturn(ToolResultDTO.success(mockObservation));
 
-        System.out.println("Success Result: " + successResult);
-
-        // Act
         AgentWorldStateModel state = observer.observe();
 
-        // Assert
         assertEquals("GitHub - Mozilla Firefox", state.activeWindow());
         assertEquals("chrome.exe", state.activeApplication());
 
         ArgumentCaptor<ToolRequestDTO> captor = ArgumentCaptor.forClass(ToolRequestDTO.class);
-        verify(inspectUiTool).execute(captor.capture());
+        verify(inspectUiTool, org.mockito.Mockito.atLeastOnce()).execute(captor.capture());
         ToolRequestDTO capturedRequest = captor.getValue();
         assertEquals("environment_observation", capturedRequest.action());
         assertEquals("get_active_window", capturedRequest.arguments().get("action"));

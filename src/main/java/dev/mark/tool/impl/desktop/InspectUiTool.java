@@ -26,12 +26,14 @@ import org.springframework.stereotype.Component;
 public class InspectUiTool implements Tool {
 
     private static final Logger log = LoggerFactory.getLogger(InspectUiTool.class);
-    private static final int TIMEOUT_SECONDS = 45;
+    private static final int TIMEOUT_SECONDS = 60;
     
+    private final dev.mark.preference.UserPreferenceService userPreferenceService;
     private final ObjectMapper objectMapper;
     private final dev.mark.agent.service.ui.UiCacheService cacheService;
 
-    public InspectUiTool(ObjectMapper objectMapper, dev.mark.agent.service.ui.UiCacheService cacheService) {
+    public InspectUiTool(dev.mark.preference.UserPreferenceService userPreferenceService, ObjectMapper objectMapper, dev.mark.agent.service.ui.UiCacheService cacheService) {
+        this.userPreferenceService = userPreferenceService;
         this.objectMapper = objectMapper;
         this.cacheService = cacheService;
     }
@@ -40,7 +42,7 @@ public class InspectUiTool implements Tool {
             "Add-Type -AssemblyName UIAutomationClient",
             "Add-Type -AssemblyName UIAutomationTypes",
             "$root = [System.Windows.Automation.AutomationElement]::RootElement",
-            "$cond = [System.Windows.Automation.Condition]::TrueCondition",
+            "$cond = [System.Windows.Automation.Automation]::ControlViewCondition",
             "$wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)",
             "foreach ($w in $wins) {",
             "  $n = $w.Current.Name",
@@ -52,6 +54,7 @@ public class InspectUiTool implements Tool {
     private static final String INSPECT_ACTIVE_SCRIPT = String.join("\n",
             "Add-Type -AssemblyName UIAutomationClient",
             "Add-Type -AssemblyName UIAutomationTypes",
+            "Add-Type -AssemblyName WindowsBase",
             "Add-Type @'",
             "using System;",
             "using System.Runtime.InteropServices;",
@@ -67,15 +70,23 @@ public class InspectUiTool implements Tool {
             "Write-Output \"Title: $($sb.ToString())\"",
             "$el = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)",
             "function Dump($e, $depth) {",
-            "  if ($depth -gt 4) { return }",
+            "  if ($depth -gt %d) { return }",
             "  $indent = '  ' * $depth",
             "  $ct = $e.Current.ControlType.ProgrammaticName",
             "  $nm = $e.Current.Name",
             "  $cls = $e.Current.ClassName",
             "  $rect = $e.Current.BoundingRectangle",
-            "  $r = \"[$([int]$rect.X),$([int]$rect.Y),$([int]$rect.Width),$([int]$rect.Height)]\"",
+            "  if ($rect.IsEmpty) {",
+            "      $r = \"[0,0,0,0]\"",
+            "  } else {",
+            "      $rx = [math]::Round($rect.X)",
+            "      $ry = [math]::Round($rect.Y)",
+            "      $rw = [math]::Round($rect.Width)",
+            "      $rh = [math]::Round($rect.Height)",
+            "      $r = \"[$rx,$ry,$rw,$rh]\"",
+            "  }",
             "  Write-Output \"${indent}${ct} | Name='${nm}' | Class='${cls}' | Rect=${r}\"",
-            "  $cond = [System.Windows.Automation.Condition]::TrueCondition",
+            "  $cond = [System.Windows.Automation.Automation]::ControlViewCondition",
             "  $kids = $e.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)",
             "  foreach ($k in $kids) { Dump $k ($depth+1) }",
             "}",
@@ -84,8 +95,9 @@ public class InspectUiTool implements Tool {
     private static final String INSPECT_BY_TITLE_TEMPLATE = String.join("\n",
             "Add-Type -AssemblyName UIAutomationClient",
             "Add-Type -AssemblyName UIAutomationTypes",
+            "Add-Type -AssemblyName WindowsBase",
             "$root = [System.Windows.Automation.AutomationElement]::RootElement",
-            "$cond = [System.Windows.Automation.Condition]::TrueCondition",
+            "$cond = [System.Windows.Automation.Automation]::ControlViewCondition",
             "$wins = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)",
             "$target = $null",
             "foreach ($w in $wins) {",
@@ -94,15 +106,23 @@ public class InspectUiTool implements Tool {
             "if (-not $target) { Write-Output 'ERROR: No window found matching the search term.'; exit 0 }",
             "Write-Output \"Title: $($target.Current.Name)\"",
             "function Dump($e, $depth) {",
-            "  if ($depth -gt 4) { return }",
+            "  if ($depth -gt %d) { return }",
             "  $indent = '  ' * $depth",
             "  $ct = $e.Current.ControlType.ProgrammaticName",
             "  $nm = $e.Current.Name",
             "  $cls = $e.Current.ClassName",
             "  $rect = $e.Current.BoundingRectangle",
-            "  $r = \"[$([int]$rect.X),$([int]$rect.Y),$([int]$rect.Width),$([int]$rect.Height)]\"",
+            "  if ($rect.IsEmpty) {",
+            "      $r = \"[0,0,0,0]\"",
+            "  } else {",
+            "      $rx = [math]::Round($rect.X)",
+            "      $ry = [math]::Round($rect.Y)",
+            "      $rw = [math]::Round($rect.Width)",
+            "      $rh = [math]::Round($rect.Height)",
+            "      $r = \"[$rx,$ry,$rw,$rh]\"",
+            "  }",
             "  Write-Output \"${indent}${ct} | Name='${nm}' | Class='${cls}' | Rect=${r}\"",
-            "  $cond = [System.Windows.Automation.Condition]::TrueCondition",
+            "  $cond = [System.Windows.Automation.Automation]::ControlViewCondition",
             "  $kids = $e.FindAll([System.Windows.Automation.TreeScope]::Children, $cond)",
             "  foreach ($k in $kids) { Dump $k ($depth+1) }",
             "}",
@@ -155,7 +175,11 @@ public class InspectUiTool implements Tool {
                         "title", Map.of(
                                 "type", "string",
                                 "description",
-                                "Window title substring to search for (only for inspect_window action)")),
+                                "Window title substring to search for (only for inspect_window action)"),
+                        "max_depth", Map.of(
+                                "type", "integer",
+                                "description",
+                                "Optional maximum depth of the UI tree to dump. Default is 7.")),
                 "required", List.of("action"));
     }
 
@@ -166,10 +190,21 @@ public class InspectUiTool implements Tool {
             return new ToolResultDTO(false, "inspect_ui requires an 'action' argument", Map.of());
         }
 
+        int maxDepth = userPreferenceService.getInt("ui.maxDepth", 7);
+        if (request.arguments().containsKey("max_depth")) {
+            Object depthObj = request.arguments().get("max_depth");
+            if (depthObj instanceof Number n) {
+                maxDepth = n.intValue();
+            }
+        }
+
         try {
             return switch (action.toLowerCase()) {
                 case "list_windows" -> runRawScript(LIST_WINDOWS_SCRIPT);
-                case "inspect_active" -> runSemanticScript(INSPECT_ACTIVE_SCRIPT, request.taskId() != null ? request.taskId().toString() : null);
+                case "inspect_active" -> {
+                    String script = String.format(INSPECT_ACTIVE_SCRIPT, maxDepth);
+                    yield runSemanticScript(script, request.taskId() != null ? request.taskId().toString() : null);
+                }
                 case "get_active_window" -> runRawScript(GET_ACTIVE_WINDOW_SCRIPT);
                 case "inspect_window" -> {
                     String title = (String) request.arguments().get("title");
@@ -177,7 +212,7 @@ public class InspectUiTool implements Tool {
                         yield new ToolResultDTO(false, "'title' is required for inspect_window", Map.of());
                     }
                     String safe = sanitizeForLiteral(title);
-                    String script = INSPECT_BY_TITLE_TEMPLATE.replace("SEARCH_TERM", safe);
+                    String script = String.format(INSPECT_BY_TITLE_TEMPLATE, maxDepth).replace("SEARCH_TERM", safe);
                     yield runSemanticScript(script, request.taskId() != null ? request.taskId().toString() : null);
                 }
                 default -> new ToolResultDTO(false, "Unknown inspect_ui action: " + action, Map.of());
@@ -241,7 +276,9 @@ public class InspectUiTool implements Tool {
     }
 
     private ProcessResult executePowerShell(String script) throws IOException, InterruptedException {
+        log.info("Executing InspectUi PowerShell script:\n{}", script);
         java.nio.file.Path tempScript = java.nio.file.Files.createTempFile("mark_inspect_", ".ps1");
+        java.nio.file.Path tempOut = java.nio.file.Files.createTempFile("mark_inspect_out_", ".txt");
         try {
             java.nio.file.Files.writeString(tempScript, script, StandardCharsets.UTF_8);
 
@@ -249,20 +286,29 @@ public class InspectUiTool implements Tool {
                     "powershell.exe", "-NoProfile", "-NonInteractive",
                     "-ExecutionPolicy", "Bypass", "-File", tempScript.toString());
             pb.redirectErrorStream(true);
+            pb.redirectOutput(tempOut.toFile());
 
             Process process = pb.start();
             boolean finished = process.waitFor(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            
+            String output = java.nio.file.Files.readString(tempOut, StandardCharsets.UTF_8).trim();
+            
             if (!finished) {
                 process.destroyForcibly();
-                return new ProcessResult(-1, "Timeout after " + TIMEOUT_SECONDS + "s");
+                if (output.length() > 3000) {
+                    output = output.substring(output.length() - 3000);
+                }
+                return new ProcessResult(-1, "Timeout after " + TIMEOUT_SECONDS + "s. Partial output:\n" + output);
             }
 
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8).trim();
             if (output.isEmpty()) output = "(no output)";
             return new ProcessResult(process.exitValue(), output);
         } finally {
             try {
                 java.nio.file.Files.deleteIfExists(tempScript);
+            } catch (IOException ignored) {}
+            try {
+                java.nio.file.Files.deleteIfExists(tempOut);
             } catch (IOException ignored) {}
         }
     }

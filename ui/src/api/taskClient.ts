@@ -35,21 +35,21 @@ export const taskApi = {
     }
   },
 
-  async interact(input: string): Promise<{ intent: 'CHAT' | 'KNOWLEDGE_QA' | 'AUTONOMOUS_TASK'; reply: string; taskId: string | null; isTask: boolean }> {
+  async interact(input: string, configName?: string): Promise<{ intent: 'CHAT' | 'KNOWLEDGE_QA' | 'AUTONOMOUS_TASK'; reply: string; taskId: string | null; isTask: boolean }> {
     const res = await fetch('/api/interact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input }),
+      body: JSON.stringify({ input, configName }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to interact`);
     return await res.json();
   },
 
-  async createTask(goal: string): Promise<TaskResponse> {
+  async createTask(goal: string, configName?: string): Promise<TaskResponse> {
     const res = await fetch(API_BASE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal }),
+      body: JSON.stringify({ goal, configName }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to create task`);
     const t = await res.json();
@@ -76,14 +76,14 @@ export const taskApi = {
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to approve task`);
   },
 
-  async getLlmConfig(): Promise<{ activeProvider: string; activeModel: string; availableProviders: string[] }> {
+  async getLlmConfig(): Promise<{ configName?: string; activeProvider: string; activeModel: string; availableProviders?: string[] }> {
     try {
       const res = await fetch('/api/config/llm');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (err) {
       console.warn('Failed to fetch LLM config:', err);
-      return { activeProvider: 'gemini', activeModel: 'gemini-3-flash-preview', availableProviders: ['gemini', 'local'] };
+      return { activeProvider: 'gemini', activeModel: 'gemini-3-flash-preview' };
     }
   },
 

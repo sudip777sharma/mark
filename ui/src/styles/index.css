@@ -73,3 +73,18 @@ code, pre {
   border: 1px solid var(--border-subtle);
   border-radius: 8px;
 }
+@keyframes ellipsis {
+  0% { content: ''; }
+  25% { content: '.'; }
+  50% { content: '..'; }
+  75% { content: '...'; }
+  100% { content: ''; }
+}
+
+.animated-ellipsis::after {
+  content: '';
+  animation: ellipsis 2s infinite;
+  display: inline-block;
+  width: 1em;
+  text-align: left;
+}

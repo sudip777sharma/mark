@@ -130,9 +130,7 @@ public class AgentToolExecutorService {
         try {
             ToolResultDTO result = tool.execute(toolRequest);
             long duration = System.currentTimeMillis() - startTime;
-            String obsPreview = result.observation() != null ?
-                (result.observation().length() > 180 ? result.observation().substring(0, 180) + "..." : result.observation().replace("\n", " "))
-                : "none";
+            String obsPreview = result.observation() != null ? result.observation() : "none";
             log.info("<<< [TOOL:DONE] taskId={} tool={} success={} durationMs={} observation='{}'",
                 taskId, toolCall.name(), result.successful(), duration, obsPreview);
             return result;

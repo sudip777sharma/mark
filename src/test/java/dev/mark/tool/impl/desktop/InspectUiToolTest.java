@@ -17,7 +17,7 @@ class InspectUiToolTest {
 
     @BeforeEach
     void setUp() {
-        tool = new InspectUiTool(new com.fasterxml.jackson.databind.ObjectMapper(), new dev.mark.agent.service.ui.UiCacheService());
+        tool = new InspectUiTool(org.mockito.Mockito.mock(dev.mark.preference.UserPreferenceService.class), new com.fasterxml.jackson.databind.ObjectMapper(), new dev.mark.agent.service.ui.UiCacheService());
     }
 
     @Test

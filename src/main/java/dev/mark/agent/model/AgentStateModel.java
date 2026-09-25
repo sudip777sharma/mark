@@ -23,18 +23,25 @@ import java.util.UUID;
 public final class AgentStateModel {
     private final UUID taskId;
     private final String goal;
+    private final String configName;
     private final Instant createdAt;
     private final List<AgentStepModel> steps = new ArrayList<>();
     private final List<LlmMessageDTO> messages = new ArrayList<>();
     private AgentStatusModel status = AgentStatusModel.CREATED;
     private List<String> plan = new ArrayList<>();
     private String finalAnswer;
+    private String currentAction;
     private AgentWorldStateModel latestWorldState = AgentWorldStateModel.empty();
 
-    public AgentStateModel(String taskId, String goal) {
+    public AgentStateModel(String taskId, String goal, String configName) {
         this.taskId = UUID.fromString(taskId);
         this.goal = goal;
+        this.configName = configName;
         this.createdAt = Instant.now();
+    }
+
+    public String configName() {
+        return configName;
     }
 
     public void setStatus(String statusStr) {
@@ -85,9 +92,9 @@ public final class AgentStateModel {
         this.plan = new ArrayList<>(plan);
     }
 
-    public String finalAnswer() {
-        return finalAnswer;
-    }
+    public String finalAnswer() { return finalAnswer; }
+    public String currentAction() { return currentAction; }
+    public void setCurrentAction(String currentAction) { this.currentAction = currentAction; }
 
     public List<LlmMessageDTO> messages() {
         return List.copyOf(messages);

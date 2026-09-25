@@ -45,8 +45,8 @@ public class ReadFileTool implements Tool {
     private static final long MAX_SIZE_BYTES = 100 * 1024;
     private final Path basePath;
 
-    public ReadFileTool(FileSystemPropertiesConfig properties) {
-        this.basePath = Path.of(properties.basePath()).toAbsolutePath();
+    public ReadFileTool(dev.mark.preference.UserPreferenceService userPreferenceService, FileSystemPropertiesConfig properties) {
+        this.basePath = Path.of(userPreferenceService.getString("filesystem.basePath", properties.basePath())).toAbsolutePath();
     }
 
     @Override public String name() { return "read_file"; }

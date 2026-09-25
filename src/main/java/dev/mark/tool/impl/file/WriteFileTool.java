@@ -38,8 +38,8 @@ import org.springframework.stereotype.Component;
 public class WriteFileTool implements Tool {
     private final Path basePath;
 
-    public WriteFileTool(FileSystemPropertiesConfig properties) {
-        this.basePath = Path.of(properties.basePath()).toAbsolutePath();
+    public WriteFileTool(dev.mark.preference.UserPreferenceService userPreferenceService, FileSystemPropertiesConfig properties) {
+        this.basePath = Path.of(userPreferenceService.getString("filesystem.basePath", properties.basePath())).toAbsolutePath();
     }
 
     @Override public String name() { return "write_file"; }

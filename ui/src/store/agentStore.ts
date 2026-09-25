@@ -39,6 +39,7 @@ interface AgentStoreState {
   isStreaming: boolean;
   setIsStreaming: (streaming: boolean) => void;
   streamLogs: StreamLogItem[];
+  setStreamLogs: (logs: StreamLogItem[]) => void;
   addStreamLog: (item: StreamLogItem) => void;
   clearStreamLogs: () => void;
   activePlan: string[];
@@ -93,6 +94,7 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   isStreaming: false,
   setIsStreaming: (isStreaming) => set({ isStreaming }),
   streamLogs: [],
+  setStreamLogs: (logs) => set({ streamLogs: logs }),
   addStreamLog: (item) => set((state) => ({ streamLogs: [...state.streamLogs, item] })),
   clearStreamLogs: () => set({ streamLogs: [] }),
   activePlan: [],

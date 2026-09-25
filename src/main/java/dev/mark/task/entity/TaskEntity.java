@@ -43,6 +43,12 @@ public class TaskEntity {
     @Column(columnDefinition = "TEXT")
     private String finalAnswer;
 
+    @Column
+    private String configName;
+
+    @Column(columnDefinition = "TEXT")
+    private String currentAction;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -79,6 +85,10 @@ public class TaskEntity {
     public void setFinalAnswer(String finalAnswer) { this.finalAnswer = finalAnswer; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+    public String getConfigName() { return configName; }
+    public String getCurrentAction() { return currentAction; }
+    public void setCurrentAction(String currentAction) { this.currentAction = currentAction; }
+    public void setConfigName(String configName) { this.configName = configName; }
     public List<AgentStepEmbeddableEntity> getSteps() { return steps; }
     public void setSteps(List<AgentStepEmbeddableEntity> steps) { this.steps = steps; }
     public List<String> getPlan() { return plan; }

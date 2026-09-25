@@ -26,5 +26,7 @@ public enum AgentStatusModel {
     VERIFYING,
     COMPLETED,
     FAILED,
-    NEEDS_INPUT
+    NEEDS_INPUT,
+    COOLDOWN,
+    QUOTA_EXHAUSTED
 }

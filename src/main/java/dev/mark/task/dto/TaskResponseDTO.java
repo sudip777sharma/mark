@@ -17,6 +17,7 @@ public record TaskResponseDTO(
         String goal,
         AgentStatusModel status,
         String finalAnswer,
+        String currentAction,
         List<String> plan,
         List<AgentStepModel> steps
 ) {

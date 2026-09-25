@@ -22,6 +22,8 @@ interface ToolCallCardProps {
   successful?: boolean;
   timestamp?: string;
   isExecuting?: boolean;
+  expandAllSignal?: number;
+  collapseAllSignal?: number;
 }
 
 export const ToolCallCard: React.FC<ToolCallCardProps> = ({
@@ -31,9 +33,19 @@ export const ToolCallCard: React.FC<ToolCallCardProps> = ({
   successful,
   timestamp,
   isExecuting = false,
+  expandAllSignal = 0,
+  collapseAllSignal = 0,
 }) => {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  React.useEffect(() => {
+    if (expandAllSignal > 0) setExpanded(true);
+  }, [expandAllSignal]);
+
+  React.useEffect(() => {
+    if (collapseAllSignal > 0) setExpanded(false);
+  }, [collapseAllSignal]);
 
   const getToolMeta = () => {
     const name = toolName.toLowerCase();

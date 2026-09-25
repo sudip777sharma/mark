@@ -18,6 +18,8 @@ export const GoalPromptBar: React.FC = () => {
   const setIsStreaming = useAgentStore((s) => s.setIsStreaming);
   const addRawLog = useAgentStore((s) => s.addRawLog);
 
+  const [configs, setConfigs] = useState<{configName: string, providerType: string, activeModel: string}[]>([]);
+
   useEffect(() => {
     taskApi.getLlmConfig().then((cfg) => {
       if (cfg?.activeProvider) {
@@ -25,19 +27,20 @@ export const GoalPromptBar: React.FC = () => {
         setActiveModel(cfg.activeModel);
       }
     });
+    fetch('/api/config/llm/all').then(res => res.json()).then(data => {
+       setConfigs(data);
+    }).catch(e => console.error(e));
   }, []);
 
   const handleSwitchProvider = async () => {
-    const next = activeProvider === 'gemini' ? 'local' : 'gemini';
-    addRawLog({ level: 'INFO', message: `Switching active LLM provider to: ${next}` });
-    try {
-      const res = await taskApi.setLlmProvider(next);
-      setActiveProvider(res.activeProvider);
-      setActiveModel(res.activeModel);
-    } catch {
-      setActiveProvider(next);
-      setActiveModel(next === 'gemini' ? 'gemini-3-flash-preview' : 'qwen2.5:7b-instruct');
-    }
+    if (configs.length === 0) return;
+    const currentIndex = configs.findIndex(c => c.configName === activeProvider);
+    const nextIndex = (currentIndex + 1) % configs.length;
+    const next = configs[nextIndex];
+    
+    addRawLog({ level: 'INFO', message: `Switching active LLM profile to: ${next.configName}` });
+    setActiveProvider(next.configName);
+    setActiveModel(next.activeModel || '');
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -45,123 +48,79 @@ export const GoalPromptBar: React.FC = () => {
     if (!goal.trim() || isSubmitting) return;
 
     const taskGoal = goal.trim();
+    setGoal('');
     setIsSubmitting(true);
+
+    // === INSTANT UI FEEDBACK ===
+    // Show streaming UI immediately, don't wait for backend
     clearStreamLogs();
     setActivePlan([]);
+    setIsStreaming(true);
 
-    try {
-      addRawLog({ level: 'INFO', message: `Input submitted: "${taskGoal}" [Provider: ${activeProvider}]` });
-
-      const interaction = await taskApi.interact(taskGoal);
-      addRawLog({ level: 'INFO', message: `Intent classified: ${interaction.intent} (isTask=${interaction.isTask})` });
-
-      if (interaction.isTask && interaction.taskId) {
-        setIsStreaming(true);
-        addStreamLog({
-          id: Math.random().toString(),
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'task:created',
-          title: 'Autonomous Mission Dispatched',
-          detail: taskGoal,
-        });
-
-        const task = await taskApi.getTask(interaction.taskId);
-        if (task) setActiveTask(task);
-      } else {
-        // Direct conversation or knowledge Q&A
-        setIsStreaming(false);
-        addStreamLog({
-          id: Math.random().toString(),
-          timestamp: new Date().toLocaleTimeString(),
-          type: 'agent:thinking',
-          title: interaction.intent === 'CHAT' ? 'Conversational Reply' : 'Knowledge Answer',
-          detail: interaction.reply,
-        });
-      }
-      setGoal('');
-    } catch (err: any) {
-      console.warn('Backend interaction notice, falling back to task dispatch:', err);
-      try {
-        const task = await taskApi.createTask(taskGoal);
-        setActiveTask(task);
-      } catch {
-        simulateTaskExecution(taskGoal);
-      }
-      setGoal('');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // Graceful visual simulation if backend is not yet started by user
-  const simulateTaskExecution = (simulatedGoal: string) => {
-    const mockId = 'mock-' + Math.random().toString(36).substring(2, 9);
-    setActiveTask({
-      id: mockId,
-      goal: simulatedGoal,
-      status: 'PLANNING',
-      steps: [],
+    addStreamLog({
+      id: 'mission-init-' + Date.now(),
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'task:created',
+      title: 'Mission Initialized',
+      detail: taskGoal,
     });
 
-    setTimeout(() => {
-      setActivePlan([
-        'Parse mathematical expression or intent',
-        'Execute deterministic calculation tool',
-        'Verify answer and synthesize result',
-      ]);
-      addStreamLog({
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'plan:generated',
-        title: 'Plan Synthesized (3 Steps)',
-        detail: '1. Parse expression -> 2. Execute CalculatorTool -> 3. Verify result',
-      });
-    }, 600);
+    addStreamLog({
+      id: 'intent-analysis-' + Date.now(),
+      timestamp: new Date().toLocaleTimeString(),
+      type: 'agent:thinking',
+      title: 'Analyzing Intent & Classifying Goal',
+      detail: 'Sending to LLM for intent classification. Waiting for response...',
+    });
 
-    setTimeout(() => {
-      addStreamLog({
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'agent:thinking',
-        title: 'Reasoning Step 1',
-        detail: `The user wants to "${simulatedGoal}". I will call CalculatorTool to compute the mathematical result.`,
-      });
-    }, 1400);
+    addRawLog({ level: 'INFO', message: `Input submitted: "${taskGoal}" [Provider: ${activeProvider}]` });
 
-    setTimeout(() => {
-      addStreamLog({
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'tool:invoking',
-        title: 'Invoking Tool',
-        toolName: 'CalculatorTool',
-        rawPayload: { expression: '15 * 8 + 42' },
-        detail: 'Calling CalculatorTool(expression="15 * 8 + 42")',
-      });
-    }, 2200);
+    // === FIRE-AND-FORGET PATTERN ===
+    // Don't await - let the backend work in the background while UI stays responsive.
+    // Use createTask directly as fallback to avoid the synchronous intent classification bottleneck.
+    taskApi.interact(taskGoal, activeProvider)
+      .then((interaction) => {
+        addRawLog({ level: 'INFO', message: `Intent classified: ${interaction.intent} (isTask=${interaction.isTask})` });
 
-    setTimeout(() => {
-      addStreamLog({
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'tool:result',
-        title: 'Tool Execution Completed',
-        toolName: 'CalculatorTool',
-        successful: true,
-        detail: '162.0',
+        if (interaction.isTask && interaction.taskId) {
+          // Task was created, poll it
+          taskApi.getTask(interaction.taskId).then((task) => {
+            if (task) setActiveTask(task);
+          });
+        } else {
+          // Direct conversation or knowledge Q&A
+          setIsStreaming(false);
+          addStreamLog({
+            id: 'reply-' + Date.now(),
+            timestamp: new Date().toLocaleTimeString(),
+            type: 'agent:thinking',
+            title: interaction.intent === 'CHAT' ? 'Conversational Reply' : 'Knowledge Answer',
+            detail: interaction.reply,
+          });
+        }
+      })
+      .catch((err: any) => {
+        console.warn('Backend interaction failed, falling back to direct task creation:', err);
+        addRawLog({ level: 'WARN', message: `Interact call failed: ${err?.message || err}. Falling back to direct createTask.` });
+        // Fallback: create the task directly, skipping intent classification entirely
+        taskApi.createTask(taskGoal, activeProvider)
+          .then((task) => {
+            if (task) setActiveTask(task);
+          })
+          .catch(() => {
+            setIsStreaming(false);
+            addStreamLog({
+              id: 'error-' + Date.now(),
+              timestamp: new Date().toLocaleTimeString(),
+              type: 'task:failed',
+              title: 'Connection Failed',
+              detail: 'Could not reach backend. Is the server running?',
+            });
+          });
+      })
+      .finally(() => {
+        setIsSubmitting(false);
       });
-    }, 3000);
-
-    setTimeout(() => {
-      addStreamLog({
-        id: Math.random().toString(),
-        timestamp: new Date().toLocaleTimeString(),
-        type: 'task:completed',
-        title: 'Task Verified & Completed',
-        detail: 'The mathematical expression evaluates accurately to 162.',
-      });
-      setIsStreaming(false);
-    }, 3800);
   };
 
   return (
@@ -191,17 +150,17 @@ export const GoalPromptBar: React.FC = () => {
         {/* Model Selector badge */}
         <div
           onClick={handleSwitchProvider}
-          title="Click to toggle between Gemini 3 Flash and Local Ollama model"
+          title="Click to cycle through available LLM providers"
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: '6px',
             padding: '6px 12px',
             borderRadius: '6px',
-            background: activeProvider === 'gemini' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(6, 182, 212, 0.15)',
-            border: activeProvider === 'gemini' ? '1px solid var(--accent-violet)' : '1px solid var(--border-focus)',
+            background: 'rgba(6, 182, 212, 0.15)',
+            border: '1px solid var(--border-focus)',
             fontSize: '11px',
-            color: activeProvider === 'gemini' ? 'var(--accent-violet)' : 'var(--accent-cyan)',
+            color: 'var(--accent-cyan)',
             fontWeight: 600,
             cursor: 'pointer',
             whiteSpace: 'nowrap',
@@ -210,7 +169,9 @@ export const GoalPromptBar: React.FC = () => {
           }}
         >
           <Cpu size={14} />
-          <span>{activeProvider.toUpperCase()}: {activeModel}</span>
+          <span>
+            {(configs.find(c => c.configName === activeProvider)?.providerType || activeProvider).toUpperCase()}: {activeModel || 'Not Configured'}
+          </span>
           <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '2px' }}>⇄</span>
         </div>
 
@@ -262,7 +223,7 @@ export const GoalPromptBar: React.FC = () => {
         }}
       >
         <span>Press <strong>Enter</strong> to dispatch goal</span>
-        <span>Local inference default (llama.cpp on :8080)</span>
+        <span>Configure models in Settings (⚙️)</span>
       </div>
     </form>
   );
