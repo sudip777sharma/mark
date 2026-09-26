@@ -103,16 +103,16 @@ LlmRouterService llmRouter,
         log.info("event=task_started taskId={}", taskId);
         Timer.Sample sample = Timer.start(meterRegistry);
 
-        String configName = taskRepository.findById(UUID.fromString(taskId))
-                .map(TaskEntity::getConfigName)
+        Long configId = taskRepository.findById(UUID.fromString(taskId))
+                .map(TaskEntity::getConfigId)
                 .orElse(null);
 
-        AgentStateModel state = new AgentStateModel(taskId, goal, configName);
+        AgentStateModel state = new AgentStateModel(taskId, goal, configId);
         state.setStatus("PLANNING");
 
         try {
-            log.info(">>> [ORCHESTRATOR:PLAN_START] taskId={} config={} goal='{}'", taskId, configName, goal);
-            List<String> plan = generatePlan(goal, configName);
+            log.info(">>> [ORCHESTRATOR:PLAN_START] taskId={} config={} goal='{}'", taskId, configId, goal);
+            List<String> plan = generatePlan(goal, configId);
             log.info("<<< [ORCHESTRATOR:PLAN_READY] taskId={} stepsCount={}", taskId, plan.size());
             state.setPlan(plan);
             state.setStatus("EXECUTING");
@@ -125,7 +125,7 @@ LlmRouterService llmRouter,
                     boolean isDailyQuota = "QUOTA_EXHAUSTED".equals(state.status());
                     consecutiveRateLimits++;
                     
-                    int maxKeys = Math.max(1, llmSettingsService.getApiKeysCount(state.configName()));
+                    int maxKeys = Math.max(1, llmSettingsService.getApiKeysCount(state.configId()));
                     
                     if (consecutiveRateLimits >= maxKeys) {
                         if (isDailyQuota) {
@@ -175,9 +175,9 @@ LlmRouterService llmRouter,
         return response(state);
     }
 
-    private List<String> generatePlan(String goal, String configName) {
+    private List<String> generatePlan(String goal, Long configId) {
         LlmRequestDTO request = new LlmRequestDTO(
-                configName,
+                configId,
                 promptBuilder.systemPromptForPlanning(),
                 null,
                 List.of(),
@@ -186,7 +186,7 @@ LlmRouterService llmRouter,
         );
 
         PlanResponseDTO planResponse = null;
-        int maxKeys = Math.max(1, llmSettingsService.getApiKeysCount(configName));
+        int maxKeys = Math.max(1, llmSettingsService.getApiKeysCount(configId));
         for (int i = 0; i < maxKeys; i++) {
             try {
                 planResponse = llmRouter.plan(request);
@@ -226,7 +226,7 @@ LlmRouterService llmRouter,
 
         List<LlmMessageDTO> context = buildContext(state);
         LlmRequestDTO request = new LlmRequestDTO(
-                state.configName(),
+                state.configId(),
                 systemPrompt,
                 "Continue execution.",
                 toolRegistryDefinitions(),
@@ -402,7 +402,7 @@ LlmRouterService llmRouter,
 
     private void saveState(AgentStateModel state) {
         TaskEntity entity = new TaskEntity(java.util.UUID.fromString(state.taskId()), state.goal(), dev.mark.agent.model.AgentStatusModel.valueOf(state.status()), state.finalAnswer(), state.createdAt());
-        entity.setConfigName(state.configName());
+        entity.setConfigId(state.configId());
         entity.setPlan(state.plan());
         entity.setCurrentAction(state.currentAction());
         List<AgentStepEmbeddableEntity> embeddables = state.steps().stream()
@@ -416,6 +416,7 @@ LlmRouterService llmRouter,
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 }
+
 
 
 

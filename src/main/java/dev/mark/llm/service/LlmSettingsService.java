@@ -28,27 +28,34 @@ public class LlmSettingsService {
         return repository.findByIsDefaultTrue();
     }
 
+    public Optional<LlmProviderConfig> getConfig(Long id) {
+        if (id == null) return Optional.empty();
+        return repository.findById(id);
+    }
+
     public Optional<LlmProviderConfig> getConfig(String configName) {
         return repository.findByConfigName(configName);
     }
 
-    private final java.util.Map<String, Integer> keyIndices = new java.util.concurrent.ConcurrentHashMap<>();
+    private final java.util.Map<Long, Integer> keyIndices = new java.util.concurrent.ConcurrentHashMap<>();
 
-    public synchronized String getNextApiKey(String configName) {
-        return repository.findByConfigName(configName)
+    public synchronized String getNextApiKey(Long configId) {
+        if (configId == null) return null;
+        return repository.findById(configId)
                 .map(config -> {
                     List<ApiKeyEntry> keys = config.getApiKeys();
                     if (keys == null || keys.isEmpty()) return null;
-                    int index = keyIndices.getOrDefault(configName, 0);
+                    int index = keyIndices.getOrDefault(configId, 0);
                     ApiKeyEntry entry = keys.get(index % keys.size());
-                    keyIndices.put(configName, (index + 1) % keys.size());
+                    keyIndices.put(configId, (index + 1) % keys.size());
                     return entry != null ? entry.getKeyValue() : null;
                 })
                 .orElse(null);
     }
 
-    public int getApiKeysCount(String configName) {
-        return repository.findByConfigName(configName)
+    public int getApiKeysCount(Long configId) {
+        if (configId == null) return 0;
+        return repository.findById(configId)
                 .map(config -> config.getApiKeys() != null ? config.getApiKeys().size() : 0)
                 .orElse(0);
     }
@@ -58,14 +65,20 @@ public class LlmSettingsService {
     }
 
     @Transactional
-    public void deleteConfig(String configName) {
-        repository.findByConfigName(configName).ifPresent(repository::delete);
+    public void deleteConfig(Long id) {
+        if (id != null) {
+            repository.findById(id).ifPresent(repository::delete);
+        }
     }
 
     @Transactional
-    public LlmProviderConfig saveConfig(String configName, String providerType, String activeModel, String baseUrl, List<ApiKeyEntry> apiKeys, boolean isDefault) {
-        LlmProviderConfig config = repository.findByConfigName(configName)
-                .orElse(new LlmProviderConfig());
+    public LlmProviderConfig saveConfig(Long id, String configName, String providerType, String activeModel, String baseUrl, List<ApiKeyEntry> apiKeys, boolean isDefault) {
+        LlmProviderConfig config;
+        if (id != null) {
+            config = repository.findById(id).orElse(new LlmProviderConfig());
+        } else {
+            config = repository.findByConfigName(configName).orElse(new LlmProviderConfig());
+        }
 
         config.setConfigName(configName);
         config.setProviderType(providerType);
@@ -76,7 +89,7 @@ public class LlmSettingsService {
         if (isDefault) {
             // Deactivate all others
             repository.findAll().forEach(c -> {
-                if (!c.getConfigName().equals(configName) && c.isDefault()) {
+                if (!c.getId().equals(config.getId()) && c.isDefault()) {
                     c.setDefault(false);
                     repository.save(c);
                 }

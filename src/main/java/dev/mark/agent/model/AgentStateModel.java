@@ -23,7 +23,7 @@ import java.util.UUID;
 public final class AgentStateModel {
     private final UUID taskId;
     private final String goal;
-    private final String configName;
+    private final Long configId;
     private final Instant createdAt;
     private final List<AgentStepModel> steps = new ArrayList<>();
     private final List<LlmMessageDTO> messages = new ArrayList<>();
@@ -33,15 +33,15 @@ public final class AgentStateModel {
     private String currentAction;
     private AgentWorldStateModel latestWorldState = AgentWorldStateModel.empty();
 
-    public AgentStateModel(String taskId, String goal, String configName) {
+    public AgentStateModel(String taskId, String goal, Long configId) {
         this.taskId = UUID.fromString(taskId);
         this.goal = goal;
-        this.configName = configName;
+        this.configId = configId;
         this.createdAt = Instant.now();
     }
 
-    public String configName() {
-        return configName;
+    public Long configId() {
+        return configId;
     }
 
     public void setStatus(String statusStr) {

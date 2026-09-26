@@ -35,21 +35,21 @@ export const taskApi = {
     }
   },
 
-  async interact(input: string, configName?: string): Promise<{ intent: 'CHAT' | 'KNOWLEDGE_QA' | 'AUTONOMOUS_TASK'; reply: string; taskId: string | null; isTask: boolean }> {
+  async interact(input: string, configId?: number): Promise<{ intent: 'CHAT' | 'KNOWLEDGE_QA' | 'AUTONOMOUS_TASK'; reply: string; taskId: string | null; isTask: boolean }> {
     const res = await fetch('/api/interact', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input, configName }),
+      body: JSON.stringify({ input, configId }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to interact`);
     return await res.json();
   },
 
-  async createTask(goal: string, configName?: string): Promise<TaskResponse> {
+  async createTask(goal: string, configId?: number): Promise<TaskResponse> {
     const res = await fetch(API_BASE, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ goal, configName }),
+      body: JSON.stringify({ goal, configId }),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to create task`);
     const t = await res.json();
@@ -76,18 +76,18 @@ export const taskApi = {
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to approve task`);
   },
 
-  async getLlmConfig(): Promise<{ configName?: string; activeProvider: string; activeModel: string; availableProviders?: string[] }> {
+  async getLlmConfig(): Promise<{ configId?: number; id: number; activeProvider: string; activeModel: string; availableProviders?: string[] }> {
     try {
       const res = await fetch('/api/config/llm');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (err) {
       console.warn('Failed to fetch LLM config:', err);
-      return { activeProvider: 'gemini', activeModel: 'gemini-3-flash-preview' };
+      return { id: -1, activeProvider: 'gemini', activeModel: 'gemini-3-flash-preview' };
     }
   },
 
-  async setLlmProvider(provider: string): Promise<{ activeProvider: string; activeModel: string; availableProviders: string[] }> {
+  async setLlmProvider(provider: string): Promise<{ id: number; activeProvider: string; activeModel: string; availableProviders: string[] }> {
     const res = await fetch('/api/config/llm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

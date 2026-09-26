@@ -52,17 +52,17 @@ public class GeminiLlmProviderService implements LlmProviderService {
 
     @Override
     public LlmResponseDTO complete(LlmRequestDTO request) {
-        String configName = request.provider();
-        if (configName == null || configName.isBlank()) {
-            configName = llmSettingsService.getDefaultConfig().map(c -> c.getConfigName()).orElse("gemini");
+        Long configId = request.configId();
+        if (configId == null) {
+            configId = llmSettingsService.getDefaultConfig().map(c -> c.getId()).orElse(null);
         }
         
-        String finalConfigName = configName;
-        String apiKey = llmSettingsService.getNextApiKey(finalConfigName);
-        String model = llmSettingsService.getConfig(finalConfigName).map(c -> c.getActiveModel()).orElse("gemini-1.5-flash");
+        Long finalConfigId = configId;
+        String apiKey = llmSettingsService.getNextApiKey(finalConfigId);
+        String model = llmSettingsService.getConfig(finalConfigId).map(c -> c.getActiveModel()).orElse("gemini-1.5-flash");
         
         if (apiKey == null || apiKey.isBlank()) {
-            throw new LlmProviderException("Gemini API key is not configured for: " + finalConfigName);
+            throw new LlmProviderException("Gemini API key is not configured for: " + finalConfigId);
         }
         
         Client client = Client.builder().apiKey(apiKey).build();
@@ -173,17 +173,17 @@ public class GeminiLlmProviderService implements LlmProviderService {
 
     @Override
     public PlanResponseDTO plan(LlmRequestDTO request) {
-        String configName = request.provider();
-        if (configName == null || configName.isBlank()) {
-            configName = llmSettingsService.getDefaultConfig().map(c -> c.getConfigName()).orElse("gemini");
+        Long configId = request.configId();
+        if (configId == null) {
+            configId = llmSettingsService.getDefaultConfig().map(c -> c.getId()).orElse(null);
         }
         
-        String finalConfigName = configName;
-        String apiKey = llmSettingsService.getNextApiKey(finalConfigName);
-        String model = llmSettingsService.getConfig(finalConfigName).map(c -> c.getActiveModel()).orElse("gemini-1.5-flash");
+        Long finalConfigId = configId;
+        String apiKey = llmSettingsService.getNextApiKey(finalConfigId);
+        String model = llmSettingsService.getConfig(finalConfigId).map(c -> c.getActiveModel()).orElse("gemini-1.5-flash");
         
         if (apiKey == null || apiKey.isBlank()) {
-            throw new LlmProviderException("Gemini API key is not configured for: " + finalConfigName);
+            throw new LlmProviderException("Gemini API key is not configured for: " + finalConfigId);
         }
         
         Client client = Client.builder().apiKey(apiKey).build();
@@ -348,3 +348,4 @@ public class GeminiLlmProviderService implements LlmProviderService {
         return builder.build();
     }
 }
+

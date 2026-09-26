@@ -54,9 +54,9 @@ interface AgentStoreState {
   setWorldState: (state: Partial<WorldState>) => void;
 
   // Active LLM Config
-  activeProvider: string;
+  activeProvider: string; activeConfigId: number;
   activeModel: string;
-  setActiveProvider: (provider: string) => void;
+  setActiveProvider: (provider: string, configId: number) => void;
   setActiveModel: (model: string) => void;
 
   // Test Mode & Unfiltered Logs
@@ -114,9 +114,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   setWorldState: (updates) =>
     set((state) => ({ worldState: { ...state.worldState, ...updates } })),
 
-  activeProvider: 'gemini',
+  activeProvider: 'gemini', activeConfigId: -1,
   activeModel: 'gemini-3-flash-preview',
-  setActiveProvider: (activeProvider) => set({ activeProvider }),
+  setActiveProvider: (activeProvider, activeConfigId) => set({ activeProvider, activeConfigId }),
   setActiveModel: (activeModel) => set({ activeModel }),
 
   isTestMode: false,

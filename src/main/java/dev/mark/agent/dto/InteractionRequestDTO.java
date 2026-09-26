@@ -9,5 +9,5 @@ public record InteractionRequestDTO(
     @NotBlank(message = "User input must not be blank")
     String input,
     
-    String configName
+    Long configId
 ) {}

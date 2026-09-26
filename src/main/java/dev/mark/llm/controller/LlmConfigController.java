@@ -24,14 +24,16 @@ public class LlmConfigController {
     public ResponseEntity<Map<String, Object>> getLlmConfig() {
         return llmSettingsService.getDefaultConfig()
                 .map(config -> ResponseEntity.ok(Map.of(
-                        "activeProvider", config.getConfigName(),
+                        "id", config.getId(),
+                        "configName", config.getConfigName(),
                         "providerType", config.getProviderType(),
                         "activeModel", config.getActiveModel() != null ? config.getActiveModel() : "",
                         "baseUrl", config.getBaseUrl() != null ? config.getBaseUrl() : "",
                         "apiKeys", config.getApiKeys() != null ? config.getApiKeys() : List.of()
                 )))
                 .orElseGet(() -> ResponseEntity.ok(Map.of(
-                        "activeProvider", "",
+                        "id", -1L,
+                        "configName", "",
                         "providerType", "gemini",
                         "activeModel", "",
                         "baseUrl", "",
@@ -48,6 +50,15 @@ public class LlmConfigController {
     public ResponseEntity<Map<String, Object>> updateProvider(@RequestBody Map<String, Object> request) {
         String configName = (String) request.get("configName");
         if (configName != null && !configName.isBlank()) {
+            Long id = null;
+            if (request.get("id") != null) {
+                if (request.get("id") instanceof Number) {
+                    id = ((Number) request.get("id")).longValue();
+                } else if (request.get("id") instanceof String) {
+                    try { id = Long.parseLong((String) request.get("id")); } catch (Exception e) {}
+                }
+            }
+
             String providerType = request.containsKey("providerType") ? (String) request.get("providerType") : "gemini";
             boolean isDefault = request.containsKey("isDefault") ? (Boolean) request.get("isDefault") : false;
             
@@ -69,14 +80,14 @@ public class LlmConfigController {
                 }
             }
             
-            llmSettingsService.saveConfig(configName, providerType, model, baseUrl, apiKeys, isDefault);
+            llmSettingsService.saveConfig(id, configName, providerType, model, baseUrl, apiKeys, isDefault);
         }
         return getLlmConfig();
     }
     
-    @DeleteMapping("/{configName}")
-    public ResponseEntity<Void> deleteProvider(@PathVariable String configName) {
-        llmSettingsService.deleteConfig(configName);
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteProvider(@PathVariable Long id) {
+        llmSettingsService.deleteConfig(id);
         return ResponseEntity.ok().build();
     }
 }

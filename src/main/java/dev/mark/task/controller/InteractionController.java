@@ -61,7 +61,7 @@ public class InteractionController {
             log.info(">>> [INTERACTION:TASK_LAUNCH] taskId={} goal='{}'", taskId, userInput);
 
             TaskEntity entity = new TaskEntity(taskId, userInput, AgentStatusModel.PLANNING, null, Instant.now());
-            entity.setConfigName(request.configName());
+            entity.setConfigId(request.configId());
             taskRepository.save(entity);
 
             log.info("Dispatching task {} to dedicated agent thread pool", taskId);

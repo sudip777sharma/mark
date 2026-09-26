@@ -46,7 +46,7 @@ public class TaskController {
     public TaskResponseDTO createAndRun(@Valid @RequestBody TaskRequestDTO request) {
         UUID taskId = UUID.randomUUID();
         TaskEntity entity = new TaskEntity(taskId, request.goal(), dev.mark.agent.model.AgentStatusModel.PLANNING, null, java.time.Instant.now());
-        entity.setConfigName(request.provider());
+        entity.setConfigId(request.configId());
         taskRepository.save(entity);
 
         log.info("Dispatching task {} to dedicated agent thread pool", taskId);

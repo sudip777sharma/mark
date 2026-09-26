@@ -12,6 +12,6 @@ import jakarta.validation.constraints.NotBlank;
 public record TaskRequestDTO(
         @NotBlank(message = "Goal cannot be blank")
         String goal,
-        String provider
+        Long configId
 ) {
 }

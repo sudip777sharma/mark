@@ -10,6 +10,7 @@ export const GoalPromptBar: React.FC = () => {
   const activeProvider = useAgentStore((s) => s.activeProvider);
   const activeModel = useAgentStore((s) => s.activeModel);
   const setActiveProvider = useAgentStore((s) => s.setActiveProvider);
+  const activeConfigId = useAgentStore((s) => s.activeConfigId);
   const setActiveModel = useAgentStore((s) => s.setActiveModel);
   const setActiveTask = useAgentStore((s) => s.setActiveTask);
   const addStreamLog = useAgentStore((s) => s.addStreamLog);
@@ -18,12 +19,12 @@ export const GoalPromptBar: React.FC = () => {
   const setIsStreaming = useAgentStore((s) => s.setIsStreaming);
   const addRawLog = useAgentStore((s) => s.addRawLog);
 
-  const [configs, setConfigs] = useState<{configName: string, providerType: string, activeModel: string}[]>([]);
+  const [configs, setConfigs] = useState<{id: number, configName: string, providerType: string, activeModel: string}[]>([]);
 
   useEffect(() => {
     taskApi.getLlmConfig().then((cfg) => {
       if (cfg?.activeProvider) {
-        setActiveProvider(cfg.activeProvider);
+        setActiveProvider(cfg.activeProvider, cfg.id || -1);
         setActiveModel(cfg.activeModel);
       }
     });
@@ -39,7 +40,7 @@ export const GoalPromptBar: React.FC = () => {
     const next = configs[nextIndex];
     
     addRawLog({ level: 'INFO', message: `Switching active LLM profile to: ${next.configName}` });
-    setActiveProvider(next.configName);
+    setActiveProvider(next.configName, next.id);
     setActiveModel(next.activeModel || '');
   };
 
@@ -78,7 +79,7 @@ export const GoalPromptBar: React.FC = () => {
     // === FIRE-AND-FORGET PATTERN ===
     // Don't await - let the backend work in the background while UI stays responsive.
     // Use createTask directly as fallback to avoid the synchronous intent classification bottleneck.
-    taskApi.interact(taskGoal, activeProvider)
+    taskApi.interact(taskGoal, activeConfigId)
       .then((interaction) => {
         addRawLog({ level: 'INFO', message: `Intent classified: ${interaction.intent} (isTask=${interaction.isTask})` });
 
@@ -103,7 +104,7 @@ export const GoalPromptBar: React.FC = () => {
         console.warn('Backend interaction failed, falling back to direct task creation:', err);
         addRawLog({ level: 'WARN', message: `Interact call failed: ${err?.message || err}. Falling back to direct createTask.` });
         // Fallback: create the task directly, skipping intent classification entirely
-        taskApi.createTask(taskGoal, activeProvider)
+        taskApi.createTask(taskGoal, activeConfigId)
           .then((task) => {
             if (task) setActiveTask(task);
           })
@@ -228,3 +229,6 @@ export const GoalPromptBar: React.FC = () => {
     </form>
   );
 };
+
+
+

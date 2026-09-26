@@ -41,7 +41,7 @@ export const SettingsView: React.FC = () => {
         
         const active = data.find(c => c.default);
         if (active) {
-          setActiveProviderStore(active.configName);
+          setActiveProviderStore(active.configName, active.id || -1);
           setActiveModelStore(active.activeModel);
           if (!selectedConfig && !isCreatingNew) {
             setSelectedConfig(active.configName);
@@ -140,7 +140,7 @@ export const SettingsView: React.FC = () => {
   const deleteConfig = async () => {
     if (!editForm.configName || !confirm('Are you sure you want to delete this profile?')) return;
     try {
-      const res = await fetch('/api/config/llm/' + encodeURIComponent(editForm.configName), {
+      const res = await fetch('/api/config/llm/' + editForm.id, {
         method: 'DELETE'
       });
       if (res.ok) {
@@ -535,5 +535,6 @@ export const SettingsView: React.FC = () => {
     </div>
   );
 };
+
 
 
