@@ -32,6 +32,7 @@ public class LlmProviderConfig {
     private boolean isDefault;
 
     @ElementCollection(fetch = FetchType.EAGER)
+    @jakarta.persistence.CollectionTable(name = "llm_api_keys")
     private List<ApiKeyEntry> apiKeys = new ArrayList<>();
 
     // For round-robin tracking (not persisted)
