@@ -36,14 +36,17 @@ public class InteractionController {
     private final AgentIntentRouterService intentRouter;
     private final AgentOrchestratorService agentEngine;
     private final TaskRepository taskRepository;
+    private final java.util.concurrent.Executor agentTaskExecutor;
 
     public InteractionController(
             AgentIntentRouterService intentRouter,
             AgentOrchestratorService agentEngine,
-            TaskRepository taskRepository) {
+            TaskRepository taskRepository,
+            @org.springframework.beans.factory.annotation.Qualifier("agentTaskExecutor") java.util.concurrent.Executor agentTaskExecutor) {
         this.intentRouter = intentRouter;
         this.agentEngine = agentEngine;
         this.taskRepository = taskRepository;
+        this.agentTaskExecutor = agentTaskExecutor;
     }
 
     @PostMapping
@@ -61,9 +64,11 @@ public class InteractionController {
             entity.setConfigName(request.configName());
             taskRepository.save(entity);
 
+            log.info("Dispatching task {} to dedicated agent thread pool", taskId);
             CompletableFuture.runAsync(() -> {
+                log.debug("Agent orchestrator starting execution for task {}", taskId);
                 agentEngine.executeTask(taskId.toString(), userInput);
-            });
+            }, agentTaskExecutor);
 
             return InteractionResponseDTO.task(taskId.toString(), "Task initialized. Generating execution plan...");
         }

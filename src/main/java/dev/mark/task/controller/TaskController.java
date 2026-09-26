@@ -7,6 +7,8 @@ import dev.mark.task.repository.TaskRepository;
 import dev.mark.task.dto.TaskRequestDTO;
 import dev.mark.task.dto.TaskResponseDTO;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -22,28 +24,21 @@ import java.util.List;
 import java.util.UUID;
 
 /**
-- What the class does: Acts as the primary REST controller managing task lifecycle endpoints, including creation, retrieval, and interactive replies or approvals.
-- Why it is useful: Exposes HTTP APIs that allow external clients to submit goals, monitor task execution progress, and interact with waiting agent steps.
-- How it fits in the flow of the application: Serves as the entry point for client requests, bridging the presentation layer with persistence and core agent orchestration services.
-- Its methods and variables and how they are useful:
-  - agentEngine: Orchestrates asynchronous background execution of AI agent tasks and manages pending human-in-the-loop interactions.
-  - taskRepository: Handles database persistence and retrieval of task entities.
-  - createAndRun: Initializes a new task entity, triggers asynchronous agent execution, and returns a response.
-  - listTasks and getTask: Fetch stored tasks for status monitoring.
-  - replyToTask and approveTask: Resume paused tasks by supplying human inputs to pending execution threads.
-  - mapToResponse: Translates internal task entities into client-safe DTO representations.
-- Its logic and how it gets fit into the overall application logic: Accepts incoming payloads, persists initial states, delegates heavy lifting to asynchronous agent workflows, and exposes query and control hooks for real-time task management.
-*/
-
+ * Acts as the primary REST controller managing task lifecycle endpoints, including creation, retrieval, and interactive replies or approvals.
+ */
 @RestController
 @RequestMapping("/api/tasks")
 public class TaskController {
+    private static final Logger log = LoggerFactory.getLogger(TaskController.class);
+
     private final AgentOrchestratorService agentEngine;
     private final TaskRepository taskRepository;
+    private final java.util.concurrent.Executor agentTaskExecutor;
 
-    public TaskController(AgentOrchestratorService agentEngine, TaskRepository taskRepository) {
+    public TaskController(AgentOrchestratorService agentEngine, TaskRepository taskRepository, @org.springframework.beans.factory.annotation.Qualifier("agentTaskExecutor") java.util.concurrent.Executor agentTaskExecutor) {
         this.agentEngine = agentEngine;
         this.taskRepository = taskRepository;
+        this.agentTaskExecutor = agentTaskExecutor;
     }
 
     @PostMapping
@@ -54,9 +49,11 @@ public class TaskController {
         entity.setConfigName(request.provider());
         taskRepository.save(entity);
 
+        log.info("Dispatching task {} to dedicated agent thread pool", taskId);
         java.util.concurrent.CompletableFuture.runAsync(() -> {
+            log.debug("Agent orchestrator starting execution for task {}", taskId);
             agentEngine.executeTask(taskId.toString(), request.goal());
-        });
+        }, agentTaskExecutor);
 
         return mapToResponse(entity);
     }
