@@ -31,36 +31,37 @@ public class LlmSettingsServiceTest {
     @BeforeEach
     void setUp() {
         config = new LlmProviderConfig();
-        config.setConfigName("groq");
+        config.setId(1L); config.setConfigName("groq");
         config.setActiveModel("test-model");
         config.setApiKeys(List.of(new dev.mark.llm.entity.ApiKeyEntry("","key1"), new dev.mark.llm.entity.ApiKeyEntry("","key2"), new dev.mark.llm.entity.ApiKeyEntry("","key3")));
     }
 
     @Test
     void testGetNextApiKey_RoundRobin() {
-        when(repository.findById("groq")).thenReturn(Optional.of(config));
+        when(repository.findById(1L)).thenReturn(Optional.of(config));
 
-        assertEquals("key1", service.getNextApiKey("groq"));
-        assertEquals("key2", service.getNextApiKey("groq"));
-        assertEquals("key3", service.getNextApiKey("groq"));
-        assertEquals("key1", service.getNextApiKey("groq"));
-        assertEquals("key2", service.getNextApiKey("groq"));
+        assertEquals("key1", service.getNextApiKey(1L));
+        assertEquals("key2", service.getNextApiKey(1L));
+        assertEquals("key3", service.getNextApiKey(1L));
+        assertEquals("key1", service.getNextApiKey(1L));
+        assertEquals("key2", service.getNextApiKey(1L));
     }
 
     @Test
     void testGetNextApiKey_EmptyKeys() {
         config.setApiKeys(List.of());
-        when(repository.findById("groq")).thenReturn(Optional.of(config));
+        when(repository.findById(1L)).thenReturn(Optional.of(config));
 
-        assertNull(service.getNextApiKey("groq"));
+        assertNull(service.getNextApiKey(1L));
     }
 
     @Test
     void testGetNextApiKey_SingleKey() {
-        config.setApiKeys(List.of("only-key"));
-        when(repository.findById("groq")).thenReturn(Optional.of(config));
+        config.setApiKeys(List.of(new dev.mark.llm.entity.ApiKeyEntry("","only-key")));
+        when(repository.findById(1L)).thenReturn(Optional.of(config));
 
-        assertEquals("only-key", service.getNextApiKey("groq"));
-        assertEquals("only-key", service.getNextApiKey("groq"));
+        assertEquals("only-key", service.getNextApiKey(1L));
+        assertEquals("only-key", service.getNextApiKey(1L));
     }
 }
+
