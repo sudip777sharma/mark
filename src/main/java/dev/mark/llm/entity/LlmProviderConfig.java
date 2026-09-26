@@ -32,7 +32,7 @@ public class LlmProviderConfig {
     private boolean isDefault;
 
     @ElementCollection(fetch = FetchType.EAGER)
-    private List<String> apiKeys = new ArrayList<>();
+    private List<ApiKeyEntry> apiKeys = new ArrayList<>();
 
     // For round-robin tracking (not persisted)
     private transient int currentKeyIndex = 0;
@@ -40,7 +40,7 @@ public class LlmProviderConfig {
     public LlmProviderConfig() {
     }
 
-    public LlmProviderConfig(String configName, String providerType, String activeModel, String baseUrl, boolean isDefault, List<String> apiKeys) {
+    public LlmProviderConfig(String configName, String providerType, String activeModel, String baseUrl, boolean isDefault, List<ApiKeyEntry> apiKeys) {
         this.configName = configName;
         this.providerType = providerType;
         this.activeModel = activeModel;
@@ -99,20 +99,11 @@ public class LlmProviderConfig {
         isDefault = aDefault;
     }
 
-    public List<String> getApiKeys() {
+    public List<ApiKeyEntry> getApiKeys() {
         return apiKeys;
     }
 
-    public void setApiKeys(List<String> apiKeys) {
+    public void setApiKeys(List<ApiKeyEntry> apiKeys) {
         this.apiKeys = apiKeys;
-    }
-
-    public synchronized String getNextApiKey() {
-        if (apiKeys == null || apiKeys.isEmpty()) {
-            return null;
-        }
-        String key = apiKeys.get(currentKeyIndex);
-        currentKeyIndex = (currentKeyIndex + 1) % apiKeys.size();
-        return key;
     }
 }

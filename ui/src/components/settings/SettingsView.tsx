@@ -9,7 +9,7 @@ interface LlmProviderConfig {
   providerType: string;
   activeModel: string;
   baseUrl: string;
-  apiKeys: string[];
+  apiKeys: {keyName?: string, keyValue: string}[];
   default: boolean;
 }
 
@@ -154,7 +154,7 @@ export const SettingsView: React.FC = () => {
 
   const handleAddKey = () => {
     const currentKeys = editForm.apiKeys || [];
-    setEditForm({ ...editForm, apiKeys: [...currentKeys, ''] });
+    setEditForm({ ...editForm, apiKeys: [...currentKeys, { keyName: '', keyValue: '' }] });
   };
 
   const handleRemoveKey = (index: number) => {
@@ -163,9 +163,9 @@ export const SettingsView: React.FC = () => {
     setEditForm({ ...editForm, apiKeys: currentKeys });
   };
 
-  const handleKeyChange = (index: number, value: string) => {
+  const handleKeyChange = (index: number, field: 'keyName' | 'keyValue', value: string) => {
     const currentKeys = [...(editForm.apiKeys || [])];
-    currentKeys[index] = value;
+    currentKeys[index] = { ...currentKeys[index], [field]: value };
     setEditForm({ ...editForm, apiKeys: currentKeys });
   };
 
@@ -407,7 +407,7 @@ export const SettingsView: React.FC = () => {
               </button>
             </div>
             
-            {(editForm.apiKeys || []).map((key, index) => (
+            {(editForm.apiKeys || []).map((keyEntry, index) => (
               <div key={index} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
                 <div style={{ 
                   background: 'rgba(255,255,255,0.02)', 
@@ -422,8 +422,24 @@ export const SettingsView: React.FC = () => {
                 </div>
                 <input 
                   type="text" 
-                  value={key} 
-                  onChange={(e) => handleKeyChange(index, e.target.value)}
+                  value={keyEntry.keyName || ''} 
+                  onChange={(e) => handleKeyChange(index, 'keyName', e.target.value)}
+                  placeholder="Optional Label (e.g. Work)"
+                  style={{
+                    width: '150px',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: '1px solid var(--border-subtle)',
+                    color: '#fff',
+                    padding: '10px 14px',
+                    borderRadius: 6,
+                    fontSize: 14,
+                    outline: 'none'
+                  }}
+                />
+                <input 
+                  type="text" 
+                  value={keyEntry.keyValue || ''} 
+                  onChange={(e) => handleKeyChange(index, 'keyValue', e.target.value)}
                   placeholder="Enter API Key..."
                   style={{
                     flex: 1,
@@ -519,3 +535,5 @@ export const SettingsView: React.FC = () => {
     </div>
   );
 };
+
+

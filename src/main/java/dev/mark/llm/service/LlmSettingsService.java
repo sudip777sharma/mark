@@ -1,6 +1,7 @@
 package dev.mark.llm.service;
 
 import dev.mark.llm.entity.LlmProviderConfig;
+import dev.mark.llm.entity.ApiKeyEntry;
 import dev.mark.llm.repository.LlmProviderConfigRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -36,12 +37,12 @@ public class LlmSettingsService {
     public synchronized String getNextApiKey(String configName) {
         return repository.findByConfigName(configName)
                 .map(config -> {
-                    List<String> keys = config.getApiKeys();
+                    List<ApiKeyEntry> keys = config.getApiKeys();
                     if (keys == null || keys.isEmpty()) return null;
                     int index = keyIndices.getOrDefault(configName, 0);
-                    String key = keys.get(index % keys.size());
+                    ApiKeyEntry entry = keys.get(index % keys.size());
                     keyIndices.put(configName, (index + 1) % keys.size());
-                    return key;
+                    return entry != null ? entry.getKeyValue() : null;
                 })
                 .orElse(null);
     }
@@ -62,7 +63,7 @@ public class LlmSettingsService {
     }
 
     @Transactional
-    public LlmProviderConfig saveConfig(String configName, String providerType, String activeModel, String baseUrl, List<String> apiKeys, boolean isDefault) {
+    public LlmProviderConfig saveConfig(String configName, String providerType, String activeModel, String baseUrl, List<ApiKeyEntry> apiKeys, boolean isDefault) {
         LlmProviderConfig config = repository.findByConfigName(configName)
                 .orElse(new LlmProviderConfig());
 
