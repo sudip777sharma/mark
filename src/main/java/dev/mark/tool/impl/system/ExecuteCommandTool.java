@@ -60,8 +60,8 @@ public class ExecuteCommandTool implements Tool {
             return new ToolResultDTO(false, "execute_command requires a non-blank string command argument", Map.of());
         }
 
+        Path tempOutputFile = null;
         try {
-            // Determine OS and create the correct process builder
             boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
             ProcessBuilder pb;
             if (isWindows) {
@@ -71,18 +71,20 @@ public class ExecuteCommandTool implements Tool {
             }
 
             pb.directory(basePath.toFile());
-            pb.redirectErrorStream(true); // merge stderr into stdout
+            pb.redirectErrorStream(true);
+            
+            tempOutputFile = java.nio.file.Files.createTempFile("cmd-out-", ".txt");
+            pb.redirectOutput(tempOutputFile.toFile());
 
             Process process = pb.start();
 
-            // Wait up to 30 seconds for the command to finish
             boolean finished = process.waitFor(30, TimeUnit.SECONDS);
             if (!finished) {
                 process.destroyForcibly();
                 return new ToolResultDTO(false, "Command timed out after 30 seconds.", Map.of());
             }
 
-            String output = new String(process.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).trim();
+            String output = java.nio.file.Files.readString(tempOutputFile, java.nio.charset.StandardCharsets.UTF_8).trim();
             int exitCode = process.exitValue();
 
             if (exitCode == 0) {
@@ -94,6 +96,13 @@ public class ExecuteCommandTool implements Tool {
         } catch (IOException | InterruptedException e) {
             Thread.currentThread().interrupt();
             return new ToolResultDTO(false, "Failed to execute command: " + e.getMessage(), Map.of());
+        } finally {
+            if (tempOutputFile != null) {
+                try {
+                    java.nio.file.Files.deleteIfExists(tempOutputFile);
+                } catch (IOException ignored) {}
+            }
         }
     }
 }
+

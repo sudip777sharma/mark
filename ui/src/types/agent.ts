@@ -1,4 +1,4 @@
-export type TaskStatus = 'PLANNING' | 'EXECUTING' | 'WAITING_USER' | 'COMPLETED' | 'FAILED' | 'COOLDOWN' | 'QUOTA_EXHAUSTED';
+export type TaskStatus = 'CREATED' | 'PLANNING' | 'EXECUTING' | 'WAITING_USER' | 'COMPLETED' | 'FAILED' | 'COOLDOWN' | 'QUOTA_EXHAUSTED';
 
 export interface AgentStep {
   number?: number;
@@ -8,6 +8,7 @@ export interface AgentStep {
   toolArguments?: string;
   outcome: string;
   provider?: string;
+  timestamp?: string;
 }
 
 export interface TaskResponse {
@@ -18,6 +19,7 @@ export interface TaskResponse {
   finalAnswer?: string | null;
   currentAction?: string | null;
   plan?: string[] | null;
+  llmRequestCount?: number;
   steps: AgentStep[];
 }
 
@@ -64,3 +66,4 @@ export interface WorldState {
 
 export type VoiceModeState = 'idle' | 'listening' | 'thinking' | 'speaking';
 export type AppViewMode = 'voice' | 'canvas' | 'settings';
+

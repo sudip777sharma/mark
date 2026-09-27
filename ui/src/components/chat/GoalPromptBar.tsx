@@ -66,37 +66,16 @@ export const GoalPromptBar: React.FC = () => {
       detail: taskGoal,
     });
 
-    addStreamLog({
-      id: 'intent-analysis-' + Date.now(),
-      timestamp: new Date().toLocaleTimeString(),
-      type: 'agent:thinking',
-      title: 'Analyzing Intent & Classifying Goal',
-      detail: 'Sending to LLM for intent classification. Waiting for response...',
-    });
-
-    addRawLog({ level: 'INFO', message: `Input submitted: "${taskGoal}" [Provider: ${activeProvider}]` });
-
     // === FIRE-AND-FORGET PATTERN ===
-    // Don't await - let the backend work in the background while UI stays responsive.
-    // Use createTask directly as fallback to avoid the synchronous intent classification bottleneck.
+    // Everything is now unified as a Task. The backend will instantly return a Task ID in CREATED state.
+    // The backend thread handles classifying it as a chat or autonomous task.
     taskApi.interact(taskGoal, activeConfigId)
       .then((interaction) => {
-        addRawLog({ level: 'INFO', message: `Intent classified: ${interaction.intent} (isTask=${interaction.isTask})` });
-
-        if (interaction.isTask && interaction.taskId) {
-          // Task was created, poll it
+        addRawLog({ level: 'INFO', message: `Goal dispatched. Tracking as Task ID: ${interaction.taskId}` });
+        if (interaction.taskId) {
+          // Poll the task to track its lifecycle (CREATED -> PLANNING/COMPLETED)
           taskApi.getTask(interaction.taskId).then((task) => {
             if (task) setActiveTask(task);
-          });
-        } else {
-          // Direct conversation or knowledge Q&A
-          setIsStreaming(false);
-          addStreamLog({
-            id: 'reply-' + Date.now(),
-            timestamp: new Date().toLocaleTimeString(),
-            type: 'agent:thinking',
-            title: interaction.intent === 'CHAT' ? 'Conversational Reply' : 'Knowledge Answer',
-            detail: interaction.reply,
           });
         }
       })

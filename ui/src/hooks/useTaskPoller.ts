@@ -18,6 +18,7 @@ export function useTaskPoller() {
 
   const seenStepsCountRef = useRef<number>(0);
   const lastTaskIdRef = useRef<string | null>(null);
+  const lastStatusRef = useRef<string | null>(null);
 
   useEffect(() => {
     const taskId = activeTask?.taskId || activeTask?.id;
@@ -25,6 +26,7 @@ export function useTaskPoller() {
 
     if (lastTaskIdRef.current !== taskId) {
       lastTaskIdRef.current = taskId;
+      lastStatusRef.current = activeTask?.status || null;
       seenStepsCountRef.current = activeTask?.steps?.length || 0;
       addRawLog({
         level: 'INFO',
@@ -33,7 +35,7 @@ export function useTaskPoller() {
       });
     }
 
-    const isRunning = activeTask.status === 'PLANNING' || activeTask.status === 'EXECUTING';
+    const isRunning = activeTask.status === 'CREATED' || activeTask.status === 'PLANNING' || activeTask.status === 'EXECUTING';
     if (!isRunning) {
       setIsStreaming(false);
       return;
@@ -41,27 +43,34 @@ export function useTaskPoller() {
 
     setIsStreaming(true);
 
-    const interval = setInterval(async () => {
+    const eventSource = new EventSource('/api/tasks/stream');
+
+    eventSource.addEventListener('task_update', (event) => {
       try {
-        const freshTask = await taskApi.getTask(taskId);
-        if (!freshTask) return;
+        const freshTask = JSON.parse(event.data);
+        
+        // We broadcast all updates, but only process if it's our active task
+        if (freshTask.id !== taskId && freshTask.taskId !== taskId) {
+           return;
+        }
 
         addRawLog({
           level: 'DEBUG',
-          message: `Polled task status: ${freshTask.status} | Steps: ${freshTask.steps?.length || 0}`,
+          message: `SSE update received: ${freshTask.status} | Steps: ${freshTask.steps?.length || 0}`,
         });
 
-        // Refresh sidebar task list
-        taskApi.listTasks().then((list) => {
-          if (list.length > 0) setTasks(list);
-        });
+        // Only fetch the full list if the status transitions (e.g. CREATED -> EXECUTING or EXECUTING -> COMPLETED)
+        if (lastStatusRef.current !== freshTask.status) {
+            lastStatusRef.current = freshTask.status;
+            taskApi.listTasks().then((list) => {
+              if (list.length > 0) setTasks(list);
+            });
+        }
 
-        // Update plan roadmap if generated
         if (freshTask.plan && freshTask.plan.length > 0) {
           setActivePlan(freshTask.plan);
         }
 
-        // Process any newly added steps
         const currentSteps = freshTask.steps || [];
         if (currentSteps.length > seenStepsCountRef.current) {
           for (let i = seenStepsCountRef.current; i < currentSteps.length; i++) {
@@ -81,20 +90,28 @@ export function useTaskPoller() {
               speechService.speak('MARK requires your guidance to proceed.');
             }
 
-            // Parse tool arguments into rawPayload for the ToolCallCard to display
             let parsedArgs: Record<string, unknown> = {};
             if (step.toolArguments) {
               try {
                 parsedArgs = JSON.parse(step.toolArguments);
               } catch (_e) {
-                // If it's not JSON, wrap it as a raw string
                 parsedArgs = { raw: step.toolArguments };
               }
             }
 
+            let stepTime = new Date().toLocaleTimeString();
+            if (step.timestamp) {
+              try {
+                const d = new Date(step.timestamp);
+                if (!isNaN(d.getTime())) {
+                  stepTime = d.toLocaleTimeString();
+                }
+              } catch(e) {}
+            }
+
             addStreamLog({
               id: `${taskId}-step-${step.stepNumber}-${Date.now()}`,
-              timestamp: new Date().toLocaleTimeString(),
+              timestamp: stepTime,
               type: step.toolName ? 'tool:result' : 'agent:thinking',
               title: step.toolName ? `Tool: ${step.toolName}` : `Step ${step.stepNumber}`,
               detail: step.outcome || step.description,
@@ -108,7 +125,6 @@ export function useTaskPoller() {
           seenStepsCountRef.current = currentSteps.length;
         }
 
-        // Handle completion / failure
         if (freshTask.status === 'COMPLETED') {
           setActiveTask(freshTask);
           setIsStreaming(false);
@@ -130,14 +146,13 @@ export function useTaskPoller() {
             detail: answer,
           });
 
-          // Speak final answer aloud
           speechService.speak(
             answer,
             () => setVoiceState('speaking'),
             () => setVoiceState('idle')
           );
 
-          clearInterval(interval);
+          eventSource.close();
         } else if (freshTask.status === 'FAILED') {
           setActiveTask(freshTask);
           setIsStreaming(false);
@@ -160,18 +175,29 @@ export function useTaskPoller() {
           });
 
           speechService.speak('Task execution encountered an error.');
-          clearInterval(interval);
+          eventSource.close();
         } else {
           setActiveTask(freshTask);
         }
       } catch (err: any) {
         addRawLog({
           level: 'WARN',
-          message: `Network polling error: ${err?.message || err}`,
+          message: `SSE parsing error: ${err?.message || err}`,
         });
       }
-    }, 1200);
+    });
 
-    return () => clearInterval(interval);
+    eventSource.onerror = () => {
+      addRawLog({
+        level: 'WARN',
+        message: 'SSE connection error, will attempt to reconnect.',
+      });
+      eventSource.close();
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, [activeTask?.taskId, activeTask?.id, activeTask?.status]);
 }
+

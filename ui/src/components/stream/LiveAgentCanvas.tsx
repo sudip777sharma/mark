@@ -9,7 +9,20 @@ import {
   Clock,
   Sparkles,
   Layers,
+  Zap,
 } from 'lucide-react';
+
+const AnimatedEllipsis: React.FC = () => {
+  const [dots, setDots] = React.useState('');
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots(prev => prev.length >= 3 ? '' : prev + '.');
+    }, 400);
+    return () => clearInterval(interval);
+  }, []);
+  // Use a fixed width span to prevent layout jitter when dots change
+  return <span style={{ display: 'inline-block', width: '1em', textAlign: 'left' }}>{dots}</span>;
+};
 
 export const LiveAgentCanvas: React.FC = () => {
   const activeTask = useAgentStore((s) => s.activeTask);
@@ -127,21 +140,43 @@ export const LiveAgentCanvas: React.FC = () => {
           </h2>
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 14px',
-            borderRadius: '9999px',
-            background: currentStatus.bg,
-            border: `1px solid ${currentStatus.color}`,
-            color: currentStatus.color,
-            fontSize: '12px',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
-          }}
-        >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {activeTask.llmRequestCount !== undefined && activeTask.llmRequestCount > 0 && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '9999px',
+                background: 'rgba(234, 179, 8, 0.15)',
+                border: '1px solid var(--accent-amber)',
+                color: 'var(--accent-amber)',
+                fontSize: '12px',
+                fontWeight: 600,
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <Zap size={13} />
+              <span>LLM Calls: {activeTask.llmRequestCount}</span>
+            </div>
+          )}
+          
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '9999px',
+              background: currentStatus.bg,
+              border: `1px solid ${currentStatus.color}`,
+              color: currentStatus.color,
+              fontSize: '12px',
+              fontWeight: 600,
+              whiteSpace: 'nowrap',
+            }}
+          >
           {isStreaming ? (
             <div
               style={{
@@ -159,6 +194,7 @@ export const LiveAgentCanvas: React.FC = () => {
             {activeTask.status}
             {activeTask.status === 'COOLDOWN' && cooldownTimer > 0 && ` (${cooldownTimer}s)`}
           </span>
+        </div>
         </div>
       </div>
 
@@ -345,7 +381,18 @@ export const LiveAgentCanvas: React.FC = () => {
             }}
           >
             <Clock size={14} className="animate-spin" />
-            <span>{activeTask?.currentAction || 'Autonomous agent executing next step...'}</span>
+            <span>
+              {activeTask?.currentAction ? (
+                <span>
+                  {activeTask.currentAction.replace(/\.+$/, '')}
+                  <AnimatedEllipsis />
+                </span>
+              ) : (
+                <span>
+                  Autonomous agent executing next step<AnimatedEllipsis />
+                </span>
+              )}
+            </span>
           </div>
         )}
 
@@ -354,3 +401,4 @@ export const LiveAgentCanvas: React.FC = () => {
     </div>
   );
 };
+

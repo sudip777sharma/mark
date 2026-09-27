@@ -39,7 +39,15 @@ export const TaskSidebar: React.FC = () => {
       const logs = [];
       task.steps.forEach((step, idx) => {
         const stepNum = step.number ?? step.stepNumber ?? (idx + 1);
-        const timeStr = `Step ${stepNum}`;
+        let timeStr = `Step ${stepNum}`;
+        if (step.timestamp) {
+          try {
+            const d = new Date(step.timestamp);
+            if (!isNaN(d.getTime())) {
+              timeStr = d.toLocaleTimeString();
+            }
+          } catch(e) {}
+        }
         
         // 1. Agent Reasoning (if present)
         if (step.description && step.description.trim() !== '') {
@@ -243,3 +251,4 @@ export const TaskSidebar: React.FC = () => {
     </div>
   );
 };
+

@@ -87,8 +87,9 @@ public class TaskController {
 
     private TaskResponseDTO mapToResponse(TaskEntity entity) {
         List<AgentStepModel> steps = entity.getSteps().stream()
-                .map(s -> new AgentStepModel(s.getStepNumber(), s.getDescription(), s.getToolName(), s.getToolArguments(), s.getOutcome(), s.getProvider()))
+                .map(s -> new AgentStepModel(s.getStepNumber(), s.getDescription(), s.getToolName(), s.getToolArguments(), s.getOutcome(), s.getProvider(), s.getTimestamp()))
                 .toList();
-        return new TaskResponseDTO(entity.getId(), entity.getGoal(), entity.getStatus(), entity.getFinalAnswer(), entity.getCurrentAction(), entity.getPlan(), steps);
+        return new TaskResponseDTO(entity.getId(), entity.getGoal(), entity.getStatus(), entity.getFinalAnswer(), entity.getCurrentAction(), entity.getPlan(), entity.getLlmRequestCount(), steps);
     }
 }
+

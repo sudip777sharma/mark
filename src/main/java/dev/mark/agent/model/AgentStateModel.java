@@ -32,6 +32,7 @@ public final class AgentStateModel {
     private String finalAnswer;
     private String currentAction;
     private AgentWorldStateModel latestWorldState = AgentWorldStateModel.empty();
+    private int llmRequestCount = 0;
 
     public AgentStateModel(String taskId, String goal, Long configId) {
         this.taskId = UUID.fromString(taskId);
@@ -100,7 +101,11 @@ public final class AgentStateModel {
         return List.copyOf(messages);
     }
 
+    public int llmRequestCount() { return llmRequestCount; }
+    public void incrementLlmRequestCount() { this.llmRequestCount++; }
+
     public AgentWorldStateModel latestWorldState() {
         return latestWorldState;
     }
 }
+

@@ -49,6 +49,9 @@ public class TaskEntity {
     @Column(columnDefinition = "TEXT")
     private String currentAction;
 
+    @Column(name = "llm_request_count", nullable = false, columnDefinition = "integer default 0")
+    private int llmRequestCount = 0;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -88,9 +91,13 @@ public class TaskEntity {
     public Long getConfigId() { return configId; }
     public String getCurrentAction() { return currentAction; }
     public void setCurrentAction(String currentAction) { this.currentAction = currentAction; }
+    public int getLlmRequestCount() { return llmRequestCount; }
+    public void setLlmRequestCount(int llmRequestCount) { this.llmRequestCount = llmRequestCount; }
     public void setConfigId(Long configId) { this.configId = configId; }
     public List<AgentStepEmbeddableEntity> getSteps() { return steps; }
     public void setSteps(List<AgentStepEmbeddableEntity> steps) { this.steps = steps; }
     public List<String> getPlan() { return plan; }
     public void setPlan(List<String> plan) { this.plan = plan; }
 }
+
+

@@ -21,6 +21,7 @@ package dev.mark.agent.model;
  * agent progress across system layers.
  */
 
-public record AgentStepModel(int number, String description, String toolName, String toolArguments, String outcome, String provider) {
+public record AgentStepModel(int number, String description, String toolName, String toolArguments, String outcome, String provider, java.time.Instant timestamp) {
 
 }
+

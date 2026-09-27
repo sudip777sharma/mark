@@ -5,6 +5,7 @@ import dev.mark.agent.dto.InteractionResponseDTO;
 import dev.mark.agent.model.AgentStatusModel;
 import dev.mark.agent.service.AgentIntentRouterService;
 import dev.mark.agent.service.AgentOrchestratorService;
+import dev.mark.task.service.TaskSseService;
 import dev.mark.task.entity.TaskEntity;
 import dev.mark.task.repository.TaskRepository;
 import jakarta.validation.Valid;
@@ -36,16 +37,19 @@ public class InteractionController {
     private final AgentIntentRouterService intentRouter;
     private final AgentOrchestratorService agentEngine;
     private final TaskRepository taskRepository;
+    private final TaskSseService taskSseService;
     private final java.util.concurrent.Executor agentTaskExecutor;
 
     public InteractionController(
             AgentIntentRouterService intentRouter,
             AgentOrchestratorService agentEngine,
             TaskRepository taskRepository,
+            TaskSseService taskSseService,
             @org.springframework.beans.factory.annotation.Qualifier("agentTaskExecutor") java.util.concurrent.Executor agentTaskExecutor) {
         this.intentRouter = intentRouter;
         this.agentEngine = agentEngine;
         this.taskRepository = taskRepository;
+        this.taskSseService = taskSseService;
         this.agentTaskExecutor = agentTaskExecutor;
     }
 
@@ -53,27 +57,55 @@ public class InteractionController {
     @ResponseStatus(HttpStatus.OK)
     public InteractionResponseDTO interact(@Valid @RequestBody InteractionRequestDTO request) {
         String userInput = request.input().trim();
+        UUID taskId = UUID.randomUUID();
+        
+        log.info(">>> [INTERACTION:RECEIVED] taskId={} input='{}'", taskId, userInput);
 
-        InteractionResponseDTO routing = intentRouter.classifyAndRoute(userInput);
+        // 1. Instantly create and save a task in CREATED state to acknowledge receipt
+        TaskEntity entity = new TaskEntity(taskId, userInput, AgentStatusModel.CREATED, null, Instant.now());
+        entity.setConfigId(request.configId());
+        entity.setCurrentAction("Analyzing intent and classifying goal...");
+        taskRepository.save(entity);
+        taskSseService.broadcastTaskUpdate(entity);
 
-        if (routing.intent() == dev.mark.agent.model.AgentIntentType.AUTONOMOUS_TASK) {
-            UUID taskId = UUID.randomUUID();
-            log.info(">>> [INTERACTION:TASK_LAUNCH] taskId={} goal='{}'", taskId, userInput);
+        // 2. Dispatch routing and execution to the background thread pool
+        CompletableFuture.runAsync(() -> {
+            try {
+                log.debug("Background intent classification starting for task {}", taskId);
+                InteractionResponseDTO routing = intentRouter.classifyAndRoute(userInput);
+                
+                TaskEntity t = taskRepository.findById(taskId).orElse(null);
+                if (t == null) return;
 
-            TaskEntity entity = new TaskEntity(taskId, userInput, AgentStatusModel.PLANNING, null, Instant.now());
-            entity.setConfigId(request.configId());
-            taskRepository.save(entity);
+                if (routing.intent() == dev.mark.agent.model.AgentIntentType.AUTONOMOUS_TASK) {
+                    t.setStatus(AgentStatusModel.PLANNING);
+                    t.setCurrentAction("Intent classified as Autonomous Task. Generating execution plan...");
+                    taskRepository.save(t);
+                    taskSseService.broadcastTaskUpdate(t);
+                    
+                    // Proceed with autonomous execution loop
+                    agentEngine.executeTask(taskId.toString(), userInput);
+                } else {
+                    // Fast-track simple chats and QA directly to completion
+                    t.setStatus(AgentStatusModel.COMPLETED);
+                    t.setFinalAnswer(routing.reply());
+                    t.setCurrentAction("Intent classified as " + routing.intent() + ". Answered directly.");
+                    taskRepository.save(t);
+                    taskSseService.broadcastTaskUpdate(t);
+                    log.info("<<< [INTERACTION:FAST_TRACK] taskId={} intent={} replyLength={}", taskId, routing.intent(), routing.reply().length());
+                }
+            } catch (Exception e) {
+                log.error("Error during async interaction routing for task {}", taskId, e);
+                taskRepository.findById(taskId).ifPresent(t -> {
+                    t.setStatus(AgentStatusModel.FAILED);
+                    t.setFinalAnswer("Internal error during intent classification.");
+                    taskRepository.save(t);
+                    taskSseService.broadcastTaskUpdate(t);
+                });
+            }
+        }, agentTaskExecutor);
 
-            log.info("Dispatching task {} to dedicated agent thread pool", taskId);
-            CompletableFuture.runAsync(() -> {
-                log.debug("Agent orchestrator starting execution for task {}", taskId);
-                agentEngine.executeTask(taskId.toString(), userInput);
-            }, agentTaskExecutor);
-
-            return InteractionResponseDTO.task(taskId.toString(), "Task initialized. Generating execution plan...");
-        }
-
-        log.info("<<< [INTERACTION:DIRECT_REPLY] intent={} replyLength={}", routing.intent(), routing.reply().length());
-        return routing;
+        // 3. Return instantly so the frontend UI doesn't lag
+        return InteractionResponseDTO.task(taskId.toString(), "Request received. Analyzing intent in background...");
     }
 }

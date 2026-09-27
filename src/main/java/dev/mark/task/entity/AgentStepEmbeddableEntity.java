@@ -37,16 +37,18 @@ public class AgentStepEmbeddableEntity {
     @Column(columnDefinition = "TEXT")
     private String outcome;
     private String provider;
+    private java.time.Instant timestamp;
 
     public AgentStepEmbeddableEntity() {}
 
-    public AgentStepEmbeddableEntity(int stepNumber, String description, String toolName, String toolArguments, String outcome, String provider) {
+    public AgentStepEmbeddableEntity(int stepNumber, String description, String toolName, String toolArguments, String outcome, String provider, java.time.Instant timestamp) {
         this.stepNumber = stepNumber;
         this.description = description;
         this.toolName = toolName;
         this.toolArguments = toolArguments;
         this.outcome = outcome;
         this.provider = provider;
+        this.timestamp = timestamp;
     }
 
     public int getStepNumber() { return stepNumber; }
@@ -61,6 +63,8 @@ public class AgentStepEmbeddableEntity {
     public void setOutcome(String outcome) { this.outcome = outcome; }
     public String getProvider() { return provider; }
     public void setProvider(String provider) { this.provider = provider; }
+    public java.time.Instant getTimestamp() { return timestamp; }
+    public void setTimestamp(java.time.Instant timestamp) { this.timestamp = timestamp; }
 
     @Override
     public boolean equals(Object o) {
@@ -75,3 +79,4 @@ public class AgentStepEmbeddableEntity {
         return Objects.hash(stepNumber, description, toolName, toolArguments, outcome, provider);
     }
 }
+

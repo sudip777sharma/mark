@@ -15,6 +15,7 @@ import dev.mark.task.dto.TaskResponseDTO;
 import dev.mark.task.entity.AgentStepEmbeddableEntity;
 import dev.mark.task.entity.TaskEntity;
 import dev.mark.task.repository.TaskRepository;
+import dev.mark.task.service.TaskSseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -59,6 +60,7 @@ public class AgentOrchestratorService {
 
     private final LlmRouterService llmRouter;
     private final TaskRepository taskRepository;
+    private final TaskSseService taskSseService;
     private final AgentEnvironmentObserver environmentObserver;
     private final AgentPropertiesConfig properties;
     private final dev.mark.preference.UserPreferenceService userPreferenceService;
@@ -72,7 +74,7 @@ public class AgentOrchestratorService {
 
     public AgentOrchestratorService(dev.mark.preference.UserPreferenceService userPreferenceService, 
 LlmRouterService llmRouter,
-                                    TaskRepository taskRepository,
+                                    TaskRepository taskRepository, dev.mark.task.service.TaskSseService taskSseService,
                                     AgentEnvironmentObserver environmentObserver,
                                     AgentPropertiesConfig properties,
                                     AgentCompletionVerifierService completionVerifier,
@@ -84,6 +86,7 @@ LlmRouterService llmRouter,
         this.userPreferenceService = userPreferenceService;
         this.llmRouter = llmRouter;
         this.taskRepository = taskRepository;
+        this.taskSseService = taskSseService;
         this.environmentObserver = environmentObserver;
         this.properties = properties;
         this.completionVerifier = completionVerifier;
@@ -112,7 +115,7 @@ LlmRouterService llmRouter,
 
         try {
             log.info(">>> [ORCHESTRATOR:PLAN_START] taskId={} config={} goal='{}'", taskId, configId, goal);
-            List<String> plan = generatePlan(goal, configId);
+            List<String> plan = generatePlan(state, goal, configId);
             log.info("<<< [ORCHESTRATOR:PLAN_READY] taskId={} stepsCount={}", taskId, plan.size());
             state.setPlan(plan);
             state.setStatus("EXECUTING");
@@ -175,7 +178,7 @@ LlmRouterService llmRouter,
         return response(state);
     }
 
-    private List<String> generatePlan(String goal, Long configId) {
+    private List<String> generatePlan(AgentStateModel state, String goal, Long configId) {
         LlmRequestDTO request = new LlmRequestDTO(
                 configId,
                 promptBuilder.systemPromptForPlanning(),
@@ -189,6 +192,7 @@ LlmRouterService llmRouter,
         int maxKeys = Math.max(1, llmSettingsService.getApiKeysCount(configId));
         for (int i = 0; i < maxKeys; i++) {
             try {
+                state.incrementLlmRequestCount();
                 planResponse = llmRouter.plan(request);
                 break;
             } catch (dev.mark.llm.exception.LlmProviderException e) {
@@ -236,6 +240,7 @@ LlmRouterService llmRouter,
 
         try {
             setAction(state, "Thinking (Waiting for LLM)...");
+            state.incrementLlmRequestCount();
             LlmResponseDTO response = llmRouter.complete(request);
             setAction(state, "Analyzing LLM response...");
 
@@ -299,7 +304,7 @@ LlmRouterService llmRouter,
                     try {
                         argsJson = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(toolCall.arguments());
                     } catch (Exception ignored) {}
-                    state.addStep(new AgentStepModel(stepNumber, response.content(), toolCall.name(), argsJson, outcome + ": " + details, response.provider()));
+                    state.addStep(new AgentStepModel(stepNumber, response.content(), toolCall.name(), argsJson, outcome + ": " + details, response.provider(), java.time.Instant.now()));
 
                     if (!toolResult.successful() || Boolean.TRUE.equals(toolResult.metadata().get("transition_detected"))) {
                         log.info("--- [ORCHESTRATOR:ABORT_BATCH] taskId={} Tool failed or transition detected, aborting subsequent tool calls in batch.", state.taskId());
@@ -338,14 +343,14 @@ LlmRouterService llmRouter,
                         state.taskId(), stepNumber, verification.reason());
                     state.setStatus("COMPLETED");
                     state.setFinalAnswer(response.content());
-                    state.addStep(new AgentStepModel(stepNumber, "Task Verified Complete", "None", "", verification.reason(), response.provider()));
+                    state.addStep(new AgentStepModel(stepNumber, "Task Verified Complete", "None", "", verification.reason(), response.provider(), java.time.Instant.now()));
                     saveState(state);
                 } else {
                     log.warn("=== [ORCHESTRATOR:CRITIQUE] taskId={} step={} Verification Failed! reason='{}' -> looping back",
                         state.taskId(), stepNumber, verification.reason());
                     LlmMessageDTO critiqueMessage = LlmMessageDTO.userMessage("System Critique: Task is not complete. " + verification.reason());
                     state.addMessage(critiqueMessage);
-                    state.addStep(new AgentStepModel(stepNumber, response.content(), "Verification Failed", "", verification.reason(), response.provider()));
+                    state.addStep(new AgentStepModel(stepNumber, response.content(), "Verification Failed", "", verification.reason(), response.provider(), java.time.Instant.now()));
                     saveState(state);
                 }
             }
@@ -385,14 +390,14 @@ LlmRouterService llmRouter,
     private TaskResponseDTO handleFailure(AgentStateModel state, String reason) {
         state.setStatus("FAILED");
         int step = state.steps().size() + 1;
-        state.addStep(new AgentStepModel(step, "Agent execution failed", "", "", reason, "system"));
+        state.addStep(new AgentStepModel(step, "Agent execution failed", "", "", reason, "system", java.time.Instant.now()));
         log.warn("event=task_failed taskId={} reason={}", state.taskId(), reason);
         return response(state);
     }
 
     private TaskResponseDTO response(AgentStateModel state) {
         saveState(state);
-        return new TaskResponseDTO(java.util.UUID.fromString(state.taskId()), state.goal(), dev.mark.agent.model.AgentStatusModel.valueOf(state.status()), state.finalAnswer(), state.currentAction(), state.plan(), state.steps());
+        return new TaskResponseDTO(java.util.UUID.fromString(state.taskId()), state.goal(), dev.mark.agent.model.AgentStatusModel.valueOf(state.status()), state.finalAnswer(), state.currentAction(), state.plan(), state.llmRequestCount(), state.steps());
     }
 
     private void setAction(AgentStateModel state, String action) {
@@ -405,17 +410,28 @@ LlmRouterService llmRouter,
         entity.setConfigId(state.configId());
         entity.setPlan(state.plan());
         entity.setCurrentAction(state.currentAction());
+        entity.setLlmRequestCount(state.llmRequestCount());
         List<AgentStepEmbeddableEntity> embeddables = state.steps().stream()
-                .map(s -> new AgentStepEmbeddableEntity(s.number(), s.description(), s.toolName(), s.toolArguments(), s.outcome(), s.provider()))
+                .map(s -> new AgentStepEmbeddableEntity(s.number(), s.description(), s.toolName(), s.toolArguments(), s.outcome(), s.provider(), s.timestamp()))
                 .collect(Collectors.toList());
         entity.setSteps(embeddables);
         taskRepository.save(entity);
+        taskSseService.broadcastTaskUpdate(entity);
     }
 
     private String failureMessage(Exception exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 }
+
+
+
+
+
+
+
+
+
 
 
 
