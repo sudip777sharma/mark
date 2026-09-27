@@ -57,6 +57,7 @@ public class TaskEntity {
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "task_steps", joinColumns = @JoinColumn(name = "task_id"))
+    @OrderColumn(name = "step_idx")
     @AttributeOverrides({
         @AttributeOverride(name = "description", column = @Column(columnDefinition = "TEXT")),
         @AttributeOverride(name = "outcome", column = @Column(columnDefinition = "TEXT"))
@@ -65,6 +66,7 @@ public class TaskEntity {
 
     @ElementCollection(fetch = FetchType.EAGER)
     @CollectionTable(name = "task_plan", joinColumns = @JoinColumn(name = "task_id"))
+    @OrderColumn(name = "plan_idx")
     @Column(name = "step", columnDefinition = "TEXT")
     private List<String> plan = new ArrayList<>();
 

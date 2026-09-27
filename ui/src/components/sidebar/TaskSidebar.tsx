@@ -13,6 +13,7 @@ export const TaskSidebar: React.FC = () => {
   const setStreamLogs = useAgentStore((s) => s.setStreamLogs);
   const setActivePlan = useAgentStore((s) => s.setActivePlan);
   const setViewMode = useAgentStore((s) => s.setViewMode);
+  const setIsStreaming = useAgentStore((s) => s.setIsStreaming);
 
   useEffect(() => {
     taskApi.listTasks().then((loaded) => {
@@ -98,6 +99,10 @@ export const TaskSidebar: React.FC = () => {
       setStreamLogs(logs);
     } else {
       clearStreamLogs();
+    }
+    
+    if (task.status === 'COMPLETED' || task.status === 'FAILED') {
+      setIsStreaming(false);
     }
     
     setActivePlan(task.plan || []);

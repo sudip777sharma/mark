@@ -35,7 +35,11 @@ export function useTaskPoller() {
       });
     }
 
-    const isRunning = activeTask.status === 'CREATED' || activeTask.status === 'PLANNING' || activeTask.status === 'EXECUTING';
+    const isRunning = activeTask.status === 'CREATED' || 
+                      activeTask.status === 'PLANNING' || 
+                      activeTask.status === 'EXECUTING' || 
+                      activeTask.status === 'QUOTA_EXHAUSTED' || 
+                      activeTask.status === 'COOLDOWN';
     if (!isRunning) {
       setIsStreaming(false);
       return;
