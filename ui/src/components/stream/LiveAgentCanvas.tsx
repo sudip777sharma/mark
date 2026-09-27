@@ -111,21 +111,31 @@ export const LiveAgentCanvas: React.FC = () => {
         flexDirection: 'column',
         height: '100%',
         overflowY: 'auto',
-        padding: '24px 28px',
       }}
     >
-      {/* Top Active Task Header */}
+      {/* Top Active Task Header Wrapper */}
       <div
-        className="glass-panel"
         style={{
-          padding: '16px 20px',
-          marginBottom: '20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          gap: '16px',
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          background: 'rgba(9, 13, 22, 0.85)',
+          padding: '24px 28px 20px 28px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
         }}
       >
+        <div
+          className="glass-panel"
+          style={{
+            padding: '16px 20px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: '16px',
+          }}
+        >
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
             <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.5px' }}>
@@ -197,6 +207,9 @@ export const LiveAgentCanvas: React.FC = () => {
         </div>
         </div>
       </div>
+      </div>
+
+      <div style={{ padding: '0 28px 24px 28px', display: 'flex', flexDirection: 'column' }}>
 
       {/* Plan Roadmap Visualizer */}
       {activePlan.length > 0 && (
@@ -395,8 +408,8 @@ export const LiveAgentCanvas: React.FC = () => {
             </span>
           </div>
         )}
-
         <div ref={bottomRef} />
+      </div>
       </div>
     </div>
   );
