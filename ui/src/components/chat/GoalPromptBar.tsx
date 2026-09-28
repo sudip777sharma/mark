@@ -19,7 +19,7 @@ export const GoalPromptBar: React.FC = () => {
   const setIsStreaming = useAgentStore((s) => s.setIsStreaming);
   const addRawLog = useAgentStore((s) => s.addRawLog);
 
-  const [configs, setConfigs] = useState<{id: number, configName: string, providerType: string, activeModel: string}[]>([]);
+  const [configs, setConfigs] = useState<any[]>([]);
 
   useEffect(() => {
     taskApi.getLlmConfig().then((cfg) => {
@@ -42,6 +42,53 @@ export const GoalPromptBar: React.FC = () => {
     addRawLog({ level: 'INFO', message: `Switching active LLM profile to: ${next.configName}` });
     setActiveProvider(next.configName, next.id);
     setActiveModel(next.activeModel || '');
+
+    // Sync with backend so Settings page reflects the active default!
+    try {
+      await fetch('/api/config/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: next.id,
+          configName: next.configName,
+          providerType: next.providerType,
+          model: next.activeModel,
+          baseUrl: next.baseUrl,
+          apiKeys: next.apiKeys,
+          isDefault: true
+        })
+      });
+    } catch (e) {
+      console.error("Failed to sync active provider with backend", e);
+    }
+  };
+
+  const handleModelChange = async (newModel: string) => {
+    const current = configs.find(c => c.configName === activeProvider);
+    if (!current) return;
+    
+    setActiveModel(newModel);
+    addRawLog({ level: 'INFO', message: `Switched model for profile ${current.configName} to: ${newModel}` });
+
+    try {
+      await fetch('/api/config/llm', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: current.id,
+          configName: current.configName,
+          providerType: current.providerType,
+          model: newModel,
+          baseUrl: current.baseUrl,
+          apiKeys: current.apiKeys,
+          isDefault: true
+        })
+      });
+      // Optionally trigger a refetch of configs here if needed, 
+      // but they are periodically fetched or fetched on mount in AppLayout.
+    } catch (e) {
+      console.error("Failed to sync model change with backend", e);
+    }
   };
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -127,32 +174,78 @@ export const GoalPromptBar: React.FC = () => {
           boxShadow: 'var(--shadow-md)',
         }}
       >
-        {/* Model Selector badge */}
-        <div
-          onClick={handleSwitchProvider}
-          title="Click to cycle through available LLM providers"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            padding: '6px 12px',
-            borderRadius: '6px',
-            background: 'rgba(6, 182, 212, 0.15)',
-            border: '1px solid var(--border-focus)',
-            fontSize: '11px',
-            color: 'var(--accent-cyan)',
-            fontWeight: 600,
-            cursor: 'pointer',
-            whiteSpace: 'nowrap',
-            userSelect: 'none',
-            transition: 'var(--transition-fast)',
-          }}
-        >
-          <Cpu size={14} />
-          <span>
-            {(configs.find(c => c.configName === activeProvider)?.providerType || activeProvider).toUpperCase()}: {activeModel || 'Not Configured'}
-          </span>
-          <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '2px' }}>⇄</span>
+        {/* Provider / Model Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* Provider Badge (Cycles Profile) */}
+          <div
+            onClick={handleSwitchProvider}
+            title="Click to cycle through available LLM providers"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              background: 'rgba(6, 182, 212, 0.15)',
+              border: '1px solid var(--border-focus)',
+              fontSize: '11px',
+              color: 'var(--accent-cyan)',
+              fontWeight: 600,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              userSelect: 'none',
+              transition: 'var(--transition-fast)',
+            }}
+          >
+            <Cpu size={14} />
+            <span>{(configs.find(c => c.configName === activeProvider)?.providerType || activeProvider).toUpperCase()}</span>
+            <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '2px' }}>⟳</span>
+          </div>
+
+          {/* Model Datalist Input */}
+          <input
+            type="text"
+            value={activeModel || ''}
+            onChange={(e) => handleModelChange(e.target.value)}
+            list="goal-model-suggestions"
+            placeholder="Model"
+            title="Active Model for this profile"
+            style={{
+              background: 'transparent',
+              border: 'none',
+              borderBottom: '1px solid var(--border-subtle)',
+              color: 'var(--text-primary)',
+              padding: '4px 6px',
+              fontSize: '11px',
+              outline: 'none',
+              width: '130px',
+              fontFamily: 'var(--font-mono)'
+            }}
+          />
+          <datalist id="goal-model-suggestions">
+            {configs.find(c => c.configName === activeProvider)?.providerType === 'openrouter' && (
+              <>
+                <option value="google/gemma-4-31b-it:free" />
+                <option value="openrouter/free" />
+                <option value="nvidia/nemotron-3-super-120b-a12b:free" />
+                <option value="google/gemma-4-26b-a4b-it:free" />
+              </>
+            )}
+            {configs.find(c => c.configName === activeProvider)?.providerType === 'groq' && (
+              <>
+                <option value="qwen3.6-27b" />
+                <option value="llama-4-scout" />
+                <option value="deepseek-v4-flash" />
+                <option value="gemma-3-31b-it" />
+              </>
+            )}
+            {configs.find(c => c.configName === activeProvider)?.providerType === 'gemini' && (
+              <>
+                <option value="gemini-3.6-flash" />
+                <option value="gemini-3.1-pro" />
+              </>
+            )}
+          </datalist>
         </div>
 
         {/* Text Input */}
