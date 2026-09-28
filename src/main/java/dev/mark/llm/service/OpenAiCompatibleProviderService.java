@@ -30,11 +30,17 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
     private final String model;
     private final RestClient client;
     private final ObjectMapper objectMapper;
+    private final LlmSettingsService llmSettingsService;
+    private final Long configId;
+    private final String apiKey;
 
-    public OpenAiCompatibleProviderService(String name, String baseUrl, String apiKey, String model, RestClient.Builder builder, ObjectMapper objectMapper) {
+    public OpenAiCompatibleProviderService(Long configId, String name, String baseUrl, String apiKey, String model, RestClient.Builder builder, ObjectMapper objectMapper, LlmSettingsService llmSettingsService) {
+        this.configId = configId;
         this.name = name;
         this.model = model;
+        this.apiKey = apiKey;
         this.objectMapper = objectMapper;
+        this.llmSettingsService = llmSettingsService;
         RestClient.Builder clientBuilder = builder.baseUrl(baseUrl);
         if (StringUtils.hasText(apiKey)) {
             clientBuilder.defaultHeader("Authorization", "Bearer " + apiKey);
@@ -70,6 +76,7 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
             return parsedResponse;
 
         } catch (RestClientResponseException exception) {
+            handleRateLimit(exception);
             throw new LlmProviderException(name + " API request failed with status " + exception.getStatusCode() + ": " + exception.getResponseBodyAsString(), exception);
         } catch (RestClientException exception) {
             throw new LlmProviderException(name + " API request failed (Connection error)", exception);
@@ -133,11 +140,25 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
             return new PlanResponseDTO(steps);
 
         } catch (RestClientResponseException exception) {
+            handleRateLimit(exception);
             throw new LlmProviderException(name + " API plan request failed with status " + exception.getStatusCode() + ": " + exception.getResponseBodyAsString(), exception);
         } catch (RestClientException exception) {
             throw new LlmProviderException(name + " API plan request failed (Connection error)", exception);
         } catch (JsonProcessingException exception) {
             throw new LlmProviderException(name + " returned malformed JSON during planning", exception);
+        }
+    }
+
+    private void handleRateLimit(RestClientResponseException exception) {
+        int status = exception.getStatusCode().value();
+        if (status == 429 || status == 402) {
+            String msg = exception.getResponseBodyAsString().toLowerCase();
+            if (msg.contains("free tier limit") || msg.contains("per day") || msg.contains("daily") || msg.contains("quota") || msg.contains("insufficient_quota") || msg.contains("insufficient balance")) {
+                log.warn("!!! [OPENAI_COMPATIBLE:DAILY_QUOTA] Exhausted limit for provider '{}'. Message: {}. Deactivating key...", name, msg);
+                if (configId != null && apiKey != null) {
+                    llmSettingsService.markKeyAsInactive(configId, apiKey);
+                }
+            }
         }
     }
 

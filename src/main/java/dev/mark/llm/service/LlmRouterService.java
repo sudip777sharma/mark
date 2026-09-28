@@ -58,13 +58,16 @@ public class LlmRouterService implements LlmProviderService {
         if ("GEMINI".equalsIgnoreCase(config.getProviderType())) {
             return gemini; 
         } else {
+            String nextApiKey = llmSettingsService.getNextApiKey(config.getId());
             return new OpenAiCompatibleProviderService(
+                    config.getId(),
                     config.getConfigName(),
                     config.getBaseUrl(),
-                    llmSettingsService.getNextApiKey(config.getId()),
+                    nextApiKey,
                     config.getActiveModel(),
                     restClientBuilder,
-                    objectMapper
+                    objectMapper,
+                    llmSettingsService
             );
         }
     }

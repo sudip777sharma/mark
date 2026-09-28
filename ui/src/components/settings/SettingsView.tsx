@@ -342,7 +342,8 @@ export const SettingsView: React.FC = () => {
               type="text" 
               value={editForm.activeModel || ''} 
               onChange={(e) => setEditForm({ ...editForm, activeModel: e.target.value })}
-              placeholder={editForm.providerType === 'gemini' ? "e.g. gemini-3-flash-preview" : "e.g. llama3-70b-8192"}
+              list="model-suggestions"
+              placeholder={editForm.providerType === 'gemini' ? "e.g. gemini-3.6-flash" : "Select or type model identifier"}
               style={{
                 background: 'rgba(255, 255, 255, 0.05)',
                 border: '1px solid var(--border-subtle)',
@@ -352,9 +353,40 @@ export const SettingsView: React.FC = () => {
                 fontSize: 14,
                 outline: 'none',
                 width: '100%',
-                maxWidth: 400
+                maxWidth: 400,
+                fontFamily: 'var(--font-mono)'
               }}
             />
+            <datalist id="model-suggestions">
+              {editForm.providerType === 'openrouter' && (
+                <>
+                  <option value="google/gemma-4-31b-it:free" />
+                  <option value="openrouter/free" />
+                  <option value="nvidia/nemotron-3-super-120b-a12b:free" />
+                  <option value="google/gemma-4-26b-a4b-it:free" />
+                  <option value="nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free" />
+                  <option value="anthropic/claude-sonnet-5.5" />
+                  <option value="openai/gpt-5.5-pro" />
+                  <option value="deepseek/deepseek-v4-pro" />
+                  <option value="qwen/qwen3.8-max-prime" />
+                </>
+              )}
+              {editForm.providerType === 'groq' && (
+                <>
+                  <option value="qwen/qwen3.6-27b" />
+                  <option value="meta-llama/llama-4-scout" />
+                  <option value="deepseek-v4-flash" />
+                  <option value="meta-llama/llama-4-maverick" />
+                </>
+              )}
+              {editForm.providerType === 'gemini' && (
+                <>
+                  <option value="gemini-3.6-flash" />
+                  <option value="gemini-3.1-pro-preview" />
+                  <option value="gemini-3.5-flash" />
+                </>
+              )}
+            </datalist>
           </div>
 
           {/* Base URL */}
