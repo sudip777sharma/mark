@@ -202,13 +202,10 @@ export const GoalPromptBar: React.FC = () => {
             <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '2px' }}>⟳</span>
           </div>
 
-          {/* Model Datalist Input */}
-          <input
-            type="text"
+          {/* Model Select Dropdown */}
+          <select
             value={activeModel || ''}
             onChange={(e) => handleModelChange(e.target.value)}
-            list="goal-model-suggestions"
-            placeholder="Model"
             title="Active Model for this profile"
             style={{
               background: 'transparent',
@@ -218,34 +215,35 @@ export const GoalPromptBar: React.FC = () => {
               padding: '4px 6px',
               fontSize: '11px',
               outline: 'none',
-              width: '130px',
-              fontFamily: 'var(--font-mono)'
+              width: '140px',
+              fontFamily: 'var(--font-mono)',
+              cursor: 'pointer'
             }}
-          />
-          <datalist id="goal-model-suggestions">
+          >
+            <option value={activeModel || ''}>{activeModel || 'Select Model'}</option>
             {configs.find(c => c.configName === activeProvider)?.providerType === 'openrouter' && (
               <>
-                <option value="google/gemma-4-31b-it:free" />
-                <option value="openrouter/free" />
-                <option value="nvidia/nemotron-3-super-120b-a12b:free" />
-                <option value="google/gemma-4-26b-a4b-it:free" />
+                <option value="google/gemma-4-31b-it:free">google/gemma-4-31b-it:free</option>
+                <option value="openrouter/free">openrouter/free</option>
+                <option value="nvidia/nemotron-3-super-120b-a12b:free">nvidia/nemotron-3-super-120b-a12b:free</option>
+                <option value="google/gemma-4-26b-a4b-it:free">google/gemma-4-26b-a4b-it:free</option>
               </>
             )}
             {configs.find(c => c.configName === activeProvider)?.providerType === 'groq' && (
               <>
-                <option value="qwen3.6-27b" />
-                <option value="llama-4-scout" />
-                <option value="deepseek-v4-flash" />
-                <option value="gemma-3-31b-it" />
+                <option value="qwen3.6-27b">qwen3.6-27b</option>
+                <option value="llama-4-scout">llama-4-scout</option>
+                <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+                <option value="gemma-3-31b-it">gemma-3-31b-it</option>
               </>
             )}
             {configs.find(c => c.configName === activeProvider)?.providerType === 'gemini' && (
               <>
-                <option value="gemini-3.6-flash" />
-                <option value="gemini-3.1-pro" />
+                <option value="gemini-3.6-flash">gemini-3.6-flash</option>
+                <option value="gemini-3.1-pro">gemini-3.1-pro</option>
               </>
             )}
-          </datalist>
+          </select>
         </div>
 
         {/* Text Input */}
