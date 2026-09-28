@@ -38,6 +38,7 @@ public class InteractionController {
     private final AgentOrchestratorService agentEngine;
     private final TaskRepository taskRepository;
     private final TaskSseService taskSseService;
+    private final dev.mark.task.repository.InteractionMessageRepository interactionRepository;
     private final java.util.concurrent.Executor agentTaskExecutor;
 
     public InteractionController(
@@ -45,11 +46,13 @@ public class InteractionController {
             AgentOrchestratorService agentEngine,
             TaskRepository taskRepository,
             TaskSseService taskSseService,
+            dev.mark.task.repository.InteractionMessageRepository interactionRepository,
             @org.springframework.beans.factory.annotation.Qualifier("agentTaskExecutor") java.util.concurrent.Executor agentTaskExecutor) {
         this.intentRouter = intentRouter;
         this.agentEngine = agentEngine;
         this.taskRepository = taskRepository;
         this.taskSseService = taskSseService;
+        this.interactionRepository = interactionRepository;
         this.agentTaskExecutor = agentTaskExecutor;
     }
 
@@ -87,6 +90,13 @@ public class InteractionController {
                     agentEngine.executeTask(taskId.toString(), userInput);
                 } else {
                     // Fast-track simple chats and QA directly to completion
+                    
+                    // 1. Persist the chat interaction for history so it's not lost
+                    dev.mark.task.entity.InteractionMessageEntity chatMsg = 
+                        new dev.mark.task.entity.InteractionMessageEntity(userInput, routing.intent(), routing.reply());
+                    interactionRepository.save(chatMsg);
+                    
+                    // 2. Keep the UI happy by closing out the dummy TaskEntity
                     t.setStatus(AgentStatusModel.COMPLETED);
                     t.setFinalAnswer(routing.reply());
                     t.setCurrentAction("Intent classified as " + routing.intent() + ". Answered directly.");
@@ -107,5 +117,10 @@ public class InteractionController {
 
         // 3. Return instantly so the frontend UI doesn't lag
         return InteractionResponseDTO.task(taskId.toString(), "Request received. Analyzing intent in background...");
+    }
+
+    @org.springframework.web.bind.annotation.GetMapping("/chat")
+    public java.util.List<dev.mark.task.entity.InteractionMessageEntity> getChatHistory() {
+        return interactionRepository.findAll(org.springframework.data.domain.Sort.by(org.springframework.data.domain.Sort.Direction.DESC, "createdAt"));
     }
 }
