@@ -72,6 +72,25 @@ public class LlmSettingsService {
                 .orElse(0);
     }
 
+    @Transactional
+    public void markKeyAsInactive(Long configId, String keyValue) {
+        if (configId == null || keyValue == null) return;
+        repository.findById(configId).ifPresent(config -> {
+            if (config.getApiKeys() != null) {
+                boolean modified = false;
+                for (ApiKeyEntry key : config.getApiKeys()) {
+                    if (keyValue.equals(key.getKeyValue()) && (key.getIsActive() == null || key.getIsActive())) {
+                        key.setIsActive(false);
+                        modified = true;
+                    }
+                }
+                if (modified) {
+                    repository.save(config);
+                }
+            }
+        });
+    }
+
     public List<LlmProviderConfig> getAllConfigs() {
         return repository.findAll();
     }

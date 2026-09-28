@@ -167,6 +167,12 @@ public class GeminiLlmProviderService implements LlmProviderService {
 
         } catch (Exception e) {
             log.error("!!! [GEMINI:FAILED] model={} error={}", model, e.getMessage(), e);
+            if (e.getMessage() != null && (e.getMessage().toLowerCase().contains("429") || e.getMessage().toLowerCase().contains("quota"))) {
+                if (e.getMessage().toLowerCase().contains("perday") || e.getMessage().toLowerCase().contains("daily")) {
+                    log.warn("!!! [GEMINI:DAILY_QUOTA] Marking API key as inactive due to daily limit.");
+                    llmSettingsService.markKeyAsInactive(finalConfigId, apiKey);
+                }
+            }
             throw new LlmProviderException("Gemini request failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()), e);
         }
     }
@@ -264,6 +270,12 @@ public class GeminiLlmProviderService implements LlmProviderService {
 
         } catch (Exception e) {
             log.error("!!! [GEMINI:PLAN:FAILED] model={} error={}", model, e.getMessage(), e);
+            if (e.getMessage() != null && (e.getMessage().toLowerCase().contains("429") || e.getMessage().toLowerCase().contains("quota"))) {
+                if (e.getMessage().toLowerCase().contains("perday") || e.getMessage().toLowerCase().contains("daily")) {
+                    log.warn("!!! [GEMINI:PLAN:DAILY_QUOTA] Marking API key as inactive due to daily limit.");
+                    llmSettingsService.markKeyAsInactive(finalConfigId, apiKey);
+                }
+            }
             throw new LlmProviderException("Gemini planning request failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()), e);
         }
     }

@@ -73,9 +73,13 @@ public class LlmConfigController {
                         Map<?, ?> map = (Map<?, ?>) item;
                         String keyName = map.get("keyName") != null ? map.get("keyName").toString() : "";
                         String keyValue = map.get("keyValue") != null ? map.get("keyValue").toString() : "";
-                        apiKeys.add(new ApiKeyEntry(keyName, keyValue));
+                        Boolean isActive = true;
+                        if (map.get("isActive") != null) {
+                            isActive = Boolean.valueOf(map.get("isActive").toString());
+                        }
+                        apiKeys.add(new ApiKeyEntry(keyName, keyValue, isActive));
                     } else if (item instanceof String) { // Backward compatibility
-                        apiKeys.add(new ApiKeyEntry("", (String) item));
+                        apiKeys.add(new ApiKeyEntry("", (String) item, true));
                     }
                 }
             }
