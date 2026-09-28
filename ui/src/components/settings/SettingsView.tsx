@@ -398,7 +398,14 @@ export const SettingsView: React.FC = () => {
               type="text" 
               value={editForm.baseUrl || ''} 
               onChange={(e) => setEditForm({ ...editForm, baseUrl: e.target.value })}
-              placeholder={editForm.providerType === 'local' ? "e.g. http://localhost:8080/v1" : "e.g. https://api.groq.com/openai/v1"}
+              list="baseurl-suggestions"
+              placeholder={
+                editForm.providerType === 'local' ? "e.g. http://localhost:11434/v1" :
+                editForm.providerType === 'openrouter' ? "e.g. https://openrouter.ai/api/v1" :
+                editForm.providerType === 'groq' ? "e.g. https://api.groq.com/openai/v1" :
+                editForm.providerType === 'colab' ? "e.g. https://your-trycloudflare.com/v1" :
+                "e.g. https://api.groq.com/openai/v1"
+              }
               style={{
                 background: 'rgba(255, 255, 255, 0.05)',
                 border: '1px solid var(--border-subtle)',
@@ -411,6 +418,11 @@ export const SettingsView: React.FC = () => {
                 maxWidth: 400
               }}
             />
+            <datalist id="baseurl-suggestions">
+              {editForm.providerType === 'openrouter' && <option value="https://openrouter.ai/api/v1" />}
+              {editForm.providerType === 'groq' && <option value="https://api.groq.com/openai/v1" />}
+              {editForm.providerType === 'local' && <option value="http://localhost:11434/v1" />}
+            </datalist>
           </div>
 
           {/* API Keys */}
