@@ -35,16 +35,20 @@ export const GoalPromptBar: React.FC = () => {
 
   const handleSwitchProvider = async () => {
     if (configs.length === 0) return;
-    const currentIndex = configs.findIndex(c => c.configName === activeProvider);
-    const nextIndex = (currentIndex + 1) % configs.length;
-    const next = configs[nextIndex];
     
-    addRawLog({ level: 'INFO', message: `Switching active LLM profile to: ${next.configName}` });
-    setActiveProvider(next.configName, next.id);
-    setActiveModel(next.activeModel || '');
-
-    // Sync with backend so Settings page reflects the active default!
     try {
+      const res = await fetch('/api/config/llm/all');
+      const latestConfigs = await res.json();
+      setConfigs(latestConfigs);
+
+      const currentIndex = latestConfigs.findIndex((c: any) => c.configName === activeProvider);
+      const nextIndex = (currentIndex + 1) % latestConfigs.length;
+      const next = latestConfigs[nextIndex];
+      
+      addRawLog({ level: 'INFO', message: `Switching active LLM profile to: ${next.configName}` });
+      setActiveProvider(next.configName, next.id);
+      setActiveModel(next.activeModel || '');
+
       await fetch('/api/config/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -59,18 +63,20 @@ export const GoalPromptBar: React.FC = () => {
         })
       });
     } catch (e) {
-      console.error("Failed to sync active provider with backend", e);
+      console.error("Failed to switch provider", e);
     }
   };
 
   const handleModelChange = async (newModel: string) => {
-    const current = configs.find(c => c.configName === activeProvider);
-    if (!current) return;
-    
     setActiveModel(newModel);
-    addRawLog({ level: 'INFO', message: `Switched model for profile ${current.configName} to: ${newModel}` });
+    addRawLog({ level: 'INFO', message: `Switched model for profile ${activeProvider} to: ${newModel}` });
 
     try {
+      const res = await fetch('/api/config/llm/all');
+      const latestConfigs = await res.json();
+      const current = latestConfigs.find((c: any) => c.configName === activeProvider);
+      if (!current) return;
+
       await fetch('/api/config/llm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -84,8 +90,7 @@ export const GoalPromptBar: React.FC = () => {
           isDefault: true
         })
       });
-      // Optionally trigger a refetch of configs here if needed, 
-      // but they are periodically fetched or fetched on mount in AppLayout.
+      setConfigs(latestConfigs);
     } catch (e) {
       console.error("Failed to sync model change with backend", e);
     }
@@ -208,39 +213,46 @@ export const GoalPromptBar: React.FC = () => {
             onChange={(e) => handleModelChange(e.target.value)}
             title="Active Model for this profile"
             style={{
-              background: 'transparent',
-              border: 'none',
-              borderBottom: '1px solid var(--border-subtle)',
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
               color: 'var(--text-primary)',
               padding: '4px 6px',
               fontSize: '11px',
               outline: 'none',
               width: '140px',
               fontFamily: 'var(--font-mono)',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              borderRadius: '4px'
             }}
           >
-            <option value={activeModel || ''}>{activeModel || 'Select Model'}</option>
+            <option value={activeModel || ''} style={{ background: 'var(--bg-card)' }}>{activeModel || 'Select Model'}</option>
             {configs.find(c => c.configName === activeProvider)?.providerType === 'openrouter' && (
               <>
-                <option value="google/gemma-4-31b-it:free">google/gemma-4-31b-it:free</option>
-                <option value="openrouter/free">openrouter/free</option>
-                <option value="nvidia/nemotron-3-super-120b-a12b:free">nvidia/nemotron-3-super-120b-a12b:free</option>
-                <option value="google/gemma-4-26b-a4b-it:free">google/gemma-4-26b-a4b-it:free</option>
+                <option value="google/gemma-4-31b-it:free" style={{ background: 'var(--bg-card)' }}>google/gemma-4-31b-it:free</option>
+                <option value="openrouter/free" style={{ background: 'var(--bg-card)' }}>openrouter/free</option>
+                <option value="nvidia/nemotron-3-super-120b-a12b:free" style={{ background: 'var(--bg-card)' }}>nvidia/nemotron-3-super-120b-a12b:free</option>
+                <option value="google/gemma-4-26b-a4b-it:free" style={{ background: 'var(--bg-card)' }}>google/gemma-4-26b-a4b-it:free</option>
+                <option value="openai/gpt-4o" style={{ background: 'var(--bg-card)' }}>openai/gpt-4o</option>
+                <option value="anthropic/claude-3.5-sonnet" style={{ background: 'var(--bg-card)' }}>anthropic/claude-3.5-sonnet</option>
+                <option value="qwen/qwen-3-72b-instruct" style={{ background: 'var(--bg-card)' }}>qwen/qwen-3-72b-instruct</option>
+                <option value="meta-llama/llama-4-70b-instruct" style={{ background: 'var(--bg-card)' }}>meta-llama/llama-4-70b-instruct</option>
               </>
             )}
             {configs.find(c => c.configName === activeProvider)?.providerType === 'groq' && (
               <>
-                <option value="qwen3.6-27b">qwen3.6-27b</option>
-                <option value="llama-4-scout">llama-4-scout</option>
-                <option value="deepseek-v4-flash">deepseek-v4-flash</option>
-                <option value="gemma-3-31b-it">gemma-3-31b-it</option>
+                <option value="qwen3.6-27b" style={{ background: 'var(--bg-card)' }}>qwen3.6-27b</option>
+                <option value="llama-4-scout" style={{ background: 'var(--bg-card)' }}>llama-4-scout</option>
+                <option value="deepseek-v4-flash" style={{ background: 'var(--bg-card)' }}>deepseek-v4-flash</option>
+                <option value="gemma-3-31b-it" style={{ background: 'var(--bg-card)' }}>gemma-3-31b-it</option>
+                <option value="mixtral-8x7b-32768" style={{ background: 'var(--bg-card)' }}>mixtral-8x7b-32768</option>
+                <option value="llama-3.1-70b-versatile" style={{ background: 'var(--bg-card)' }}>llama-3.1-70b-versatile</option>
+                <option value="llama-3.1-8b-instant" style={{ background: 'var(--bg-card)' }}>llama-3.1-8b-instant</option>
               </>
             )}
             {configs.find(c => c.configName === activeProvider)?.providerType === 'gemini' && (
               <>
-                <option value="gemini-3.6-flash">gemini-3.6-flash</option>
-                <option value="gemini-3.1-pro">gemini-3.1-pro</option>
+                <option value="gemini-3.6-flash" style={{ background: 'var(--bg-card)' }}>gemini-3.6-flash</option>
+                <option value="gemini-3.1-pro" style={{ background: 'var(--bg-card)' }}>gemini-3.1-pro</option>
               </>
             )}
           </select>
