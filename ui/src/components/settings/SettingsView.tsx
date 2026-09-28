@@ -88,7 +88,8 @@ export const SettingsView: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          configName: configName,
+          id: existing.id,
+            configName: configName,
           providerType: existing.providerType,
           model: existing.activeModel,
           baseUrl: existing.baseUrl,
@@ -116,7 +117,8 @@ export const SettingsView: React.FC = () => {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          configName: editForm.configName,
+          id: editForm.id,
+            configName: editForm.configName,
           providerType: editForm.providerType,
           model: editForm.activeModel || '',
           baseUrl: editForm.baseUrl || '',
@@ -273,18 +275,15 @@ export const SettingsView: React.FC = () => {
           
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              {isCreatingNew ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <input
-                    value={editForm.configName || ''}
-                    onChange={(e) => setEditForm({...editForm, configName: e.target.value})}
-                    placeholder="Profile Name"
-                    style={{ fontSize: 20, fontWeight: 'bold', background: 'transparent', color: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '4px 8px' }}
-                  />
-                </div>
-              ) : (
-                <h2 style={{ color: '#fff', fontSize: 20, margin: '0 0 4px 0' }}>{editForm.configName} Settings</h2>
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <input
+                  value={editForm.configName || ''}
+                  onChange={(e) => setEditForm({...editForm, configName: e.target.value})}
+                  placeholder="Profile Name"
+                  style={{ fontSize: 20, fontWeight: 'bold', background: 'transparent', color: '#fff', border: '1px solid var(--border-subtle)', borderRadius: 6, padding: '4px 8px' }}
+                />
+                {!isCreatingNew && <span style={{ color: '#fff', fontSize: 20, fontWeight: 'bold' }}>Settings</span>}
+              </div>
               <p style={{ color: 'var(--text-secondary)', fontSize: 13, margin: '8px 0 0 0' }}>
                 Configure models, base URLs, and API keys for this profile.
               </p>
