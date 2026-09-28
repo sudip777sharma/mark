@@ -9,7 +9,7 @@ interface LlmProviderConfig {
   providerType: string;
   activeModel: string;
   baseUrl: string;
-  apiKeys: {keyName?: string, keyValue: string}[];
+  apiKeys: {keyName?: string, keyValue: string, isActive?: boolean}[];
   default: boolean;
 }
 
@@ -163,7 +163,7 @@ export const SettingsView: React.FC = () => {
     setEditForm({ ...editForm, apiKeys: currentKeys });
   };
 
-  const handleKeyChange = (index: number, field: 'keyName' | 'keyValue', value: string) => {
+  const handleKeyChange = (index: number, field: 'keyName' | 'keyValue' | 'isActive', value: string | boolean) => {
     const currentKeys = [...(editForm.apiKeys || [])];
     currentKeys[index] = { ...currentKeys[index], [field]: value };
     setEditForm({ ...editForm, apiKeys: currentKeys });
@@ -452,6 +452,26 @@ export const SettingsView: React.FC = () => {
                     outline: 'none'
                   }}
                 />
+                <button 
+                  onClick={() => handleKeyChange(index, 'isActive', keyEntry.isActive === undefined ? false : !keyEntry.isActive)}
+                  style={{
+                    background: (keyEntry.isActive === undefined || keyEntry.isActive) ? 'rgba(34, 197, 94, 0.1)' : 'rgba(107, 114, 128, 0.1)',
+                    color: (keyEntry.isActive === undefined || keyEntry.isActive) ? '#22c55e' : '#9ca3af',
+                    border: '1px solid ' + ((keyEntry.isActive === undefined || keyEntry.isActive) ? 'rgba(34, 197, 94, 0.3)' : 'rgba(107, 114, 128, 0.3)'),
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    minWidth: 80
+                  }}
+                  title={(keyEntry.isActive === undefined || keyEntry.isActive) ? "Active (Click to disable)" : "Inactive (Click to enable)"}
+                >
+                  {(keyEntry.isActive === undefined || keyEntry.isActive) ? 'Active' : 'Inactive'}
+                </button>
                 <button 
                   onClick={() => handleRemoveKey(index)}
                   style={{
