@@ -43,11 +43,18 @@ public class LlmSettingsService {
         if (configId == null) return null;
         return repository.findById(configId)
                 .map(config -> {
-                    List<ApiKeyEntry> keys = config.getApiKeys();
-                    if (keys == null || keys.isEmpty()) return null;
+                    List<ApiKeyEntry> allKeys = config.getApiKeys();
+                    if (allKeys == null || allKeys.isEmpty()) return null;
+                    
+                    List<ApiKeyEntry> activeKeys = allKeys.stream()
+                            .filter(k -> k.getIsActive() == null || k.getIsActive())
+                            .toList();
+                            
+                    if (activeKeys.isEmpty()) return null; // All keys exhausted
+
                     int index = keyIndices.getOrDefault(configId, 0);
-                    ApiKeyEntry entry = keys.get(index % keys.size());
-                    keyIndices.put(configId, (index + 1) % keys.size());
+                    ApiKeyEntry entry = activeKeys.get(index % activeKeys.size());
+                    keyIndices.put(configId, (index + 1) % activeKeys.size());
                     return entry != null ? entry.getKeyValue() : null;
                 })
                 .orElse(null);
@@ -56,7 +63,12 @@ public class LlmSettingsService {
     public int getApiKeysCount(Long configId) {
         if (configId == null) return 0;
         return repository.findById(configId)
-                .map(config -> config.getApiKeys() != null ? config.getApiKeys().size() : 0)
+                .map(config -> {
+                    if (config.getApiKeys() == null) return 0;
+                    return (int) config.getApiKeys().stream()
+                            .filter(k -> k.getIsActive() == null || k.getIsActive())
+                            .count();
+                })
                 .orElse(0);
     }
 
