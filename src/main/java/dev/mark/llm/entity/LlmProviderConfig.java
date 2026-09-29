@@ -30,6 +30,8 @@ public class LlmProviderConfig {
     private String baseUrl;
 
     private boolean isDefault;
+    
+    private Boolean isConfigured = false;
 
     @ElementCollection(fetch = FetchType.EAGER)
     @jakarta.persistence.CollectionTable(name = "llm_api_keys")
@@ -98,6 +100,14 @@ public class LlmProviderConfig {
 
     public void setDefault(boolean aDefault) {
         isDefault = aDefault;
+    }
+    
+    public Boolean isConfigured() {
+        return isConfigured != null ? isConfigured : false;
+    }
+
+    public void setConfigured(Boolean configured) {
+        isConfigured = configured;
     }
 
     public List<ApiKeyEntry> getApiKeys() {

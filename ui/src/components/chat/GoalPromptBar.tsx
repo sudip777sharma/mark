@@ -59,7 +59,8 @@ export const GoalPromptBar: React.FC = () => {
           model: next.activeModel,
           baseUrl: next.baseUrl,
           apiKeys: next.apiKeys,
-          isDefault: true
+          isDefault: true,
+          isConfigured: next.configured
         })
       });
     } catch (e) {
@@ -87,7 +88,8 @@ export const GoalPromptBar: React.FC = () => {
           model: newModel,
           baseUrl: current.baseUrl,
           apiKeys: current.apiKeys,
-          isDefault: true
+          isDefault: true,
+          isConfigured: current.configured
         })
       });
       setConfigs(latestConfigs);
@@ -203,6 +205,16 @@ export const GoalPromptBar: React.FC = () => {
             }}
           >
             <Cpu size={14} />
+            <div 
+              title={configs.find(c => c.configName === activeProvider)?.configured ? "Tested & Configured" : "Not Configured"}
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: configs.find(c => c.configName === activeProvider)?.configured ? '#10b981' : '#ef4444',
+                boxShadow: configs.find(c => c.configName === activeProvider)?.configured ? '0 0 5px rgba(16,185,129,0.5)' : 'none'
+              }}
+            />
             <span>{(configs.find(c => c.configName === activeProvider)?.providerType || activeProvider).toUpperCase()}</span>
             <span style={{ fontSize: '10px', opacity: 0.7, marginLeft: '2px' }}>⟳</span>
           </div>

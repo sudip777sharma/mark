@@ -11,6 +11,7 @@ interface LlmProviderConfig {
   baseUrl: string;
   apiKeys: {keyName?: string, keyValue: string, isActive?: boolean}[];
   default: boolean;
+  configured?: boolean;
 }
 
 const PROVIDER_TYPES = ['gemini', 'local', 'groq', 'openrouter', 'colab'];
@@ -100,6 +101,53 @@ export const SettingsView: React.FC = () => {
       await fetchAllConfigs();
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{success: boolean, message: string} | null>(null);
+  const [keyTestStatuses, setKeyTestStatuses] = useState<Record<number, {status: 'testing'|'success'|'error', message?: string}>>({});
+
+  const testConnection = async () => {
+    if (!editForm.id) {
+      alert("Please save the configuration first before testing.");
+      return;
+    }
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const res = await fetch(`/api/config/llm/${editForm.id}/test`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      setTestResult({ success: res.ok, message: data.message || (res.ok ? "Success!" : "Failed") });
+      if (res.ok) {
+        await fetchAllConfigs();
+      }
+    } catch (e: any) {
+      setTestResult({ success: false, message: e.message || "Network error" });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const testSpecificKey = async (index: number, apiKey: string) => {
+    setKeyTestStatuses(prev => ({ ...prev, [index]: { status: 'testing' } }));
+    try {
+      const res = await fetch('/api/config/llm/test-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          providerType: editForm.providerType,
+          model: editForm.activeModel,
+          baseUrl: editForm.baseUrl,
+          apiKey: apiKey
+        })
+      });
+      const data = await res.json();
+      setKeyTestStatuses(prev => ({ ...prev, [index]: { status: res.ok ? 'success' : 'error', message: data.message || (res.ok ? "OK" : "Error") } }));
+    } catch (e: any) {
+      setKeyTestStatuses(prev => ({ ...prev, [index]: { status: 'error', message: e.message || "Network error" } }));
     }
   };
 
@@ -240,11 +288,37 @@ export const SettingsView: React.FC = () => {
                   </span>
                 </div>
                 
-                {isActive && (
-                  <div title="Active Default Provider" style={{ color: 'var(--accent-cyan)' }}>
-                    <CheckCircle2 size={16} />
-                  </div>
-                )}
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  {!configData.configured && (
+                    <div title="Not Configured" style={{
+                      fontSize: 10,
+                      background: 'rgba(239, 68, 68, 0.1)',
+                      color: '#ef4444',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      border: '1px solid rgba(239, 68, 68, 0.2)'
+                    }}>
+                      NOT CONFIGURED
+                    </div>
+                  )}
+                  {configData.configured && (
+                    <div title="Configured" style={{
+                      fontSize: 10,
+                      background: 'rgba(16, 185, 129, 0.1)',
+                      color: '#10b981',
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      border: '1px solid rgba(16, 185, 129, 0.2)'
+                    }}>
+                      CONFIGURED
+                    </div>
+                  )}
+                  {isActive && (
+                    <div title="Active Default Provider" style={{ color: 'var(--accent-cyan)' }}>
+                      <CheckCircle2 size={16} />
+                    </div>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -495,6 +569,28 @@ export const SettingsView: React.FC = () => {
                     outline: 'none'
                   }}
                 />
+                <button
+                  onClick={() => testSpecificKey(index, keyEntry.keyValue)}
+                  disabled={!keyEntry.keyValue || keyTestStatuses[index]?.status === 'testing'}
+                  style={{
+                    background: keyTestStatuses[index]?.status === 'success' ? 'rgba(16, 185, 129, 0.1)' : keyTestStatuses[index]?.status === 'error' ? 'rgba(239, 68, 68, 0.1)' : 'rgba(6, 182, 212, 0.1)',
+                    color: keyTestStatuses[index]?.status === 'success' ? '#10b981' : keyTestStatuses[index]?.status === 'error' ? '#ef4444' : 'var(--accent-cyan)',
+                    border: '1px solid ' + (keyTestStatuses[index]?.status === 'success' ? 'rgba(16, 185, 129, 0.3)' : keyTestStatuses[index]?.status === 'error' ? 'rgba(239, 68, 68, 0.3)' : 'rgba(6, 182, 212, 0.3)'),
+                    padding: '8px 14px',
+                    borderRadius: 6,
+                    cursor: (!keyEntry.keyValue || keyTestStatuses[index]?.status === 'testing') ? 'not-allowed' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    minWidth: 80,
+                    opacity: (!keyEntry.keyValue || keyTestStatuses[index]?.status === 'testing') ? 0.5 : 1
+                  }}
+                  title={keyTestStatuses[index]?.message || "Test this specific key"}
+                >
+                  {keyTestStatuses[index]?.status === 'testing' ? 'Testing...' : keyTestStatuses[index]?.status === 'success' ? 'Passed' : keyTestStatuses[index]?.status === 'error' ? 'Failed' : 'Test Key'}
+                </button>
                 <button 
                   onClick={() => handleKeyChange(index, 'isActive', keyEntry.isActive === undefined ? false : !keyEntry.isActive)}
                   style={{
@@ -546,7 +642,7 @@ export const SettingsView: React.FC = () => {
           <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'flex-start', paddingTop: 20, gap: 12 }}>
             <button 
               onClick={saveConfig}
-              disabled={saving}
+              disabled={saving || (editForm.apiKeys || []).length === 0 || (editForm.apiKeys || []).some(k => !k.keyValue.trim())}
               style={{
                 background: 'var(--accent-cyan)',
                 color: '#07090e',
@@ -555,17 +651,43 @@ export const SettingsView: React.FC = () => {
                 borderRadius: 6,
                 fontSize: 14,
                 fontWeight: 600,
-                cursor: saving ? 'not-allowed' : 'pointer',
+                cursor: (saving || (editForm.apiKeys || []).length === 0 || (editForm.apiKeys || []).some(k => !k.keyValue.trim())) ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
-                opacity: saving ? 0.7 : 1,
+                opacity: (saving || (editForm.apiKeys || []).length === 0 || (editForm.apiKeys || []).some(k => !k.keyValue.trim())) ? 0.5 : 1,
                 boxShadow: '0 0 15px rgba(6, 182, 212, 0.3)'
               }}
+              title={(editForm.apiKeys || []).length === 0 || (editForm.apiKeys || []).some(k => !k.keyValue.trim()) ? "Please add a valid API key first" : ""}
             >
               <Save size={16} />
               {saving ? 'Saving...' : 'Save Configuration'}
             </button>
+
+            {!isCreatingNew && (
+              <button 
+                onClick={testConnection}
+                disabled={testing}
+                style={{
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-subtle)',
+                  padding: '10px 24px',
+                  borderRadius: 6,
+                  fontSize: 14,
+                  fontWeight: 600,
+                  cursor: testing ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  opacity: testing ? 0.7 : 1
+                }}
+              >
+                {testing ? <Circle size={16} /> : <CheckCircle2 size={16} color={editForm.configured ? "#10b981" : "currentColor"} />}
+                {testing ? 'Testing...' : (editForm.configured ? 'Tested (Configured)' : 'Test Connection')}
+              </button>
+            )}
+
             {!isCreatingNew && (
               <button 
                 onClick={deleteConfig}
@@ -582,7 +704,8 @@ export const SettingsView: React.FC = () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: 8,
-                  opacity: saving ? 0.7 : 1
+                  opacity: saving ? 0.7 : 1,
+                  marginLeft: 'auto'
                 }}
               >
                 <Trash2 size={16} />
@@ -590,6 +713,24 @@ export const SettingsView: React.FC = () => {
               </button>
             )}
           </div>
+          
+          {testResult && (
+            <div style={{
+              marginTop: '12px',
+              padding: '12px',
+              borderRadius: '6px',
+              background: testResult.success ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+              border: `1px solid ${testResult.success ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)'}`,
+              color: testResult.success ? '#10b981' : '#ef4444',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px'
+            }}>
+              <CheckCircle2 size={14} />
+              {testResult.message}
+            </div>
+          )}
 
         </div>
       </div>
