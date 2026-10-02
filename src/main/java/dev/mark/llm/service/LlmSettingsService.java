@@ -103,7 +103,7 @@ public class LlmSettingsService {
     }
 
     @Transactional
-    public LlmProviderConfig saveConfig(Long id, String configName, String providerType, String activeModel, String baseUrl, List<ApiKeyEntry> apiKeys, boolean isDefault) {
+    public LlmProviderConfig saveConfig(Long id, String configName, String providerType, String activeModel, String baseUrl, List<ApiKeyEntry> apiKeys, boolean isDefault, boolean isConfigured) {
         LlmProviderConfig config;
         if (id != null) {
             config = repository.findById(id).orElse(new LlmProviderConfig());
@@ -116,6 +116,7 @@ public class LlmSettingsService {
         config.setActiveModel(activeModel);
         config.setBaseUrl(baseUrl);
         config.setApiKeys(apiKeys);
+        config.setConfigured(isConfigured);
         
         if (isDefault) {
             // Deactivate all others

@@ -204,7 +204,7 @@ LlmRouterService llmRouter,
                 }
             }
         }
-        if (planResponse == null) throw new dev.mark.llm.exception.LlmProviderException("Gemini planning request failed: 429 Quota Exceeded across all keys");
+        if (planResponse == null) throw new dev.mark.llm.exception.LlmProviderException("LLM planning request failed: 429 Quota/Rate Limit Exceeded across all keys");
         if (planResponse.steps() == null || planResponse.steps().isEmpty()) {
             log.warn("--- [ORCHESTRATOR:PLAN_FALLBACK] taskId=unknown goal='{}' using single step fallback", goal);
             return List.of(goal); // fallback to goal as single step

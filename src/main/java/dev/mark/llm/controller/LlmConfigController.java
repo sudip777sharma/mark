@@ -102,7 +102,7 @@ public class LlmConfigController {
     public ResponseEntity<Map<String, Object>> testProvider(@PathVariable Long id) {
         try {
             dev.mark.llm.dto.LlmRequestDTO request = new dev.mark.llm.dto.LlmRequestDTO(
-                id, "You are a network tester.", "Reply exactly with 'OK'", java.util.List.of(), java.util.List.of(), null
+                id, "You are a network tester.", "Reply exactly with 'OK'"
             );
             dev.mark.llm.dto.LlmResponseDTO response = llmRouterService.complete(request);
             if (response != null && response.content() != null && !response.content().isBlank()) {
