@@ -30,6 +30,7 @@ public class AgentIntentRouterService {
 
     private final LlmRouterService llmRouter;
     private final ObjectMapper objectMapper;
+    private final dev.mark.task.service.TaskSseService taskSseService;
 
     private static final String INTENT_SYSTEM_PROMPT = """
         You are the intelligent intent classifier and interactive conversational dispatcher for MARK, an autonomous desktop agent.
@@ -50,13 +51,16 @@ public class AgentIntentRouterService {
            - Examples: "calculate 15 * 8 and save to file.txt", "open Chrome and search for flights", "list files in my workspace", "organize downloads", "type this into Notepad", "inspect my screen".
            - Action: Set 'reply' to null and let the autonomous engine plan and execute it.
 
-        You MUST reply with ONLY a single raw JSON object in this exact format (no markdown formatting, no code blocks):
+        You MUST reply with ONLY a single raw JSON object in this exact format (no markdown formatting, no code blocks).
+        First, output a <thinking> block to explain your reasoning, then output the JSON:
+        <thinking>Your thought process here...</thinking>
         {"intent": "CHAT" | "KNOWLEDGE_QA" | "AUTONOMOUS_TASK", "reply": "<text or null>"}
         """;
 
-    public AgentIntentRouterService(LlmRouterService llmRouter, ObjectMapper objectMapper) {
+    public AgentIntentRouterService(LlmRouterService llmRouter, ObjectMapper objectMapper, dev.mark.task.service.TaskSseService taskSseService) {
         this.llmRouter = llmRouter;
         this.objectMapper = objectMapper;
+        this.taskSseService = taskSseService;
     }
 
     /**
@@ -84,7 +88,7 @@ public class AgentIntentRouterService {
             LlmResponseDTO response = null;
             for (int i = 0; i < 5; i++) {
                 try {
-                    response = llmRouter.complete(request);
+                    response = llmRouter.completeStream(request, chunk -> taskSseService.broadcastThoughtChunk(chunk));
                     break;
                 } catch (dev.mark.llm.exception.LlmProviderException e) {
                     if (e.getMessage() != null && e.getMessage().contains("429")) {
@@ -99,6 +103,10 @@ public class AgentIntentRouterService {
             long duration = System.currentTimeMillis() - startTime;
 
             String rawContent = response.content() != null ? response.content().trim() : "";
+            
+            // Strip out the <thinking> block to leave only the JSON
+            rawContent = rawContent.replaceAll("(?s)<thinking>.*?</thinking>", "").trim();
+            
             // Clean markdown fences if present
             if (rawContent.startsWith("```json")) {
                 rawContent = rawContent.substring(7);
