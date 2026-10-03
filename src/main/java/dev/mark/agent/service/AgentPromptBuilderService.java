@@ -280,6 +280,7 @@ public class AgentPromptBuilderService {
         }
         sb.append("\nRules:\n");
         sb.append("- Use ONLY the tools listed above. Never invent tools.\n");
+        sb.append("- THOUGHT PROCESS: Before outputting any tool call, you MUST output a brief <thinking> block explaining your reasoning. For example:\n<thinking>I need to click the search bar, so I will use desktop_automation...</thinking>\nThen invoke the tool.\n");
         sb.append("- Match the task to the most specific tool. For file operations use read_file/write_file/list_directory.\n");
         sb.append("- **BATCHING**: You CAN and SHOULD output multiple tool calls sequentially in a single response to form a segment of steps (e.g., focus -> delay -> click -> delay -> type). Do not wait for intermediate observations if the sequence is deterministic.\n");
         sb.append("- When the task is complete, return a concise final response WITHOUT a tool call.\n");

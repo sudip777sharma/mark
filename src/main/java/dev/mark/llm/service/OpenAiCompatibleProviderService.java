@@ -55,29 +55,125 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
 
     @Override
     public LlmResponseDTO complete(LlmRequestDTO request) {
+        return completeStream(request, null);
+    }
+
+    @Override
+    public LlmResponseDTO completeStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
         try {
             Map<String, Object> requestBody = buildRequestBody(request);
+
+            if (onChunk != null) {
+                requestBody.put("stream", true);
+            }
 
             log.info(">>> [LLM COMPLETION REQUEST - {}]", name);
             log.info(">>> User Prompt: {}", request.userPrompt());
 
-            String response = client.post()
-                    .uri("/chat/completions")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(String.class);
+            if (onChunk == null) {
+                String response = client.post()
+                        .uri("/chat/completions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(requestBody)
+                        .retrieve()
+                        .body(String.class);
 
-            LlmResponseDTO parsedResponse = parseResponse(response);
-            log.info("<<< [LLM COMPLETION RESPONSE - {}]", name);
-            log.info("<<< Content Length: {}, Tool Calls: {}",
-                     parsedResponse.content() == null ? 0 : parsedResponse.content().length(),
-                     parsedResponse.toolCalls().size());
-            return parsedResponse;
+                LlmResponseDTO parsedResponse = parseResponse(response);
+                log.info("<<< [LLM COMPLETION RESPONSE - {}]", name);
+                log.info("<<< Content Length: {}, Tool Calls: {}",
+                         parsedResponse.content() == null ? 0 : parsedResponse.content().length(),
+                         parsedResponse.toolCalls().size());
+                return parsedResponse;
+            } else {
+                return client.post()
+                        .uri("/chat/completions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(requestBody)
+                        .exchange((clientRequest, clientResponse) -> {
+                            if (clientResponse.getStatusCode().isError()) {
+                                String errBody = new String(clientResponse.getBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                                int status = clientResponse.getStatusCode().value();
+                                if (status == 429 || status == 402) {
+                                    String msg = errBody.toLowerCase();
+                                    if (msg.contains("free tier limit") || msg.contains("per day") || msg.contains("daily") || msg.contains("quota") || msg.contains("insufficient_quota") || msg.contains("insufficient balance")) {
+                                        log.warn("!!! [OPENAI_COMPATIBLE:DAILY_QUOTA] Exhausted limit for provider '{}'. Message: {}. Deactivating key...", name, msg);
+                                        if (configId != null && apiKey != null) {
+                                            llmSettingsService.markKeyAsInactive(configId, apiKey);
+                                        }
+                                    }
+                                }
+                                throw new LlmProviderException(name + " API completion request failed with status " + status + ": " + errBody);
+                            }
+                            StringBuilder sbContent = new StringBuilder();
+                            List<LlmToolCallDTO> parsedToolCalls = new ArrayList<>();
+                            Map<Integer, Map<String, Object>> toolCallBuilders = new LinkedHashMap<>();
+                            
+                            try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(clientResponse.getBody(), java.nio.charset.StandardCharsets.UTF_8))) {
+                                String line;
+                                while ((line = reader.readLine()) != null) {
+                                    if (line.startsWith("data: ")) {
+                                        String data = line.substring(6).trim();
+                                        if ("[DONE]".equals(data)) break;
+                                        try {
+                                            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(data);
+                                            com.fasterxml.jackson.databind.JsonNode deltaNode = node.path("choices").path(0).path("delta");
+                                            
+                                            // 1. Accumulate Content
+                                            com.fasterxml.jackson.databind.JsonNode contentNode = deltaNode.path("content");
+                                            if (!contentNode.isMissingNode() && !contentNode.isNull()) {
+                                                String chunk = contentNode.asText();
+                                                sbContent.append(chunk);
+                                                onChunk.accept(chunk);
+                                            }
+                                            
+                                            // 2. Accumulate Tool Calls
+                                            com.fasterxml.jackson.databind.JsonNode toolCallsNode = deltaNode.path("tool_calls");
+                                            if (toolCallsNode.isArray()) {
+                                                for (com.fasterxml.jackson.databind.JsonNode tcNode : toolCallsNode) {
+                                                    int index = tcNode.path("index").asInt();
+                                                    Map<String, Object> builder = toolCallBuilders.computeIfAbsent(index, k -> new LinkedHashMap<>());
+                                                    
+                                                    if (tcNode.has("id")) builder.put("id", tcNode.get("id").asText());
+                                                    
+                                                    com.fasterxml.jackson.databind.JsonNode functionNode = tcNode.path("function");
+                                                    if (!functionNode.isMissingNode()) {
+                                                        if (functionNode.has("name")) builder.put("name", functionNode.get("name").asText());
+                                                        if (functionNode.has("arguments")) {
+                                                            String existingArgs = (String) builder.getOrDefault("arguments", "");
+                                                            builder.put("arguments", existingArgs + functionNode.get("arguments").asText());
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        } catch (Exception ex) {
+                                            log.warn("Failed to parse SSE completion chunk: " + data, ex);
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            for (Map<String, Object> builder : toolCallBuilders.values()) {
+                                String id = (String) builder.get("id");
+                                String functionName = (String) builder.get("name");
+                                String argsJson = (String) builder.getOrDefault("arguments", "{}");
+                                Map<String, Object> args = Map.of();
+                                try {
+                                    if (!argsJson.trim().isEmpty()) {
+                                        args = objectMapper.readValue(argsJson, new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
+                                    }
+                                } catch (Exception ex) {
+                                    log.warn("Failed to parse tool call args: {}", argsJson, ex);
+                                }
+                                parsedToolCalls.add(new LlmToolCallDTO(id != null ? id : java.util.UUID.randomUUID().toString(), functionName != null ? functionName : "", args, Map.of()));
+                            }
 
-        } catch (RestClientResponseException exception) {
-            handleRateLimit(exception);
-            throw new LlmProviderException(name + " API request failed with status " + exception.getStatusCode() + ": " + exception.getResponseBodyAsString(), exception);
+                            log.info("<<< [LLM COMPLETION RESPONSE - {}]", name);
+                            log.info("<<< Content Length: {}, Tool Calls: {}", sbContent.length(), parsedToolCalls.size());
+                            
+                            return new LlmResponseDTO(sbContent.toString(), name, false, parsedToolCalls);
+                        });
+            }
+
         } catch (RestClientException exception) {
             throw new LlmProviderException(name + " API request failed (Connection error)", exception);
         }
@@ -86,15 +182,22 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
     @Override
     @SuppressWarnings("unchecked")
     public PlanResponseDTO plan(LlmRequestDTO request) {
+        return planStream(request, null);
+    }
+
+    @Override
+    public PlanResponseDTO planStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
         try {
             Map<String, Object> requestBody = buildRequestBody(request);
             requestBody.put("response_format", Map.of("type", "json_object"));
+            if (onChunk != null) {
+                requestBody.put("stream", true);
+            }
 
             List<Map<String, Object>> messages = (List<Map<String, Object>>) requestBody.get("messages");
             boolean hasSystem = false;
             for (Map<String, Object> msg : messages) {
                 if ("system".equals(msg.get("role"))) {
-                    // Update the system message map. We must create a new map since Map.of creates immutable maps.
                     Map<String, Object> newMsg = new LinkedHashMap<>(msg);
                     newMsg.put("content", newMsg.get("content") + "\n\nIMPORTANT: You must return a valid JSON object with a single key 'steps' that contains a JSON array of strings.");
                     messages.set(messages.indexOf(msg), newMsg);
@@ -109,17 +212,65 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
             log.info(">>> [LLM PLAN REQUEST - {}]", name);
             log.info(">>> User Prompt: {}", request.userPrompt());
 
-            String response = client.post()
-                    .uri("/chat/completions")
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(requestBody)
-                    .retrieve()
-                    .body(String.class);
+            String fullContent;
 
-            LlmResponseDTO llmResponse = parseResponse(response);
+            if (onChunk == null) {
+                String response = client.post()
+                        .uri("/chat/completions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(requestBody)
+                        .retrieve()
+                        .body(String.class);
+                LlmResponseDTO llmResponse = parseResponse(response);
+                fullContent = llmResponse.content();
+            } else {
+                fullContent = client.post()
+                        .uri("/chat/completions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(requestBody)
+                        .exchange((clientRequest, clientResponse) -> {
+                            if (clientResponse.getStatusCode().isError()) {
+                                String errBody = new String(clientResponse.getBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+                                int status = clientResponse.getStatusCode().value();
+                                if (status == 429 || status == 402) {
+                                    String msg = errBody.toLowerCase();
+                                    if (msg.contains("free tier limit") || msg.contains("per day") || msg.contains("daily") || msg.contains("quota") || msg.contains("insufficient_quota") || msg.contains("insufficient balance")) {
+                                        log.warn("!!! [OPENAI_COMPATIBLE:DAILY_QUOTA] Exhausted limit for provider '{}'. Message: {}. Deactivating key...", name, msg);
+                                        if (configId != null && apiKey != null) {
+                                            llmSettingsService.markKeyAsInactive(configId, apiKey);
+                                        }
+                                    }
+                                }
+                                throw new LlmProviderException(name + " API plan request failed with status " + status + ": " + errBody);
+                            }
+                            StringBuilder sb = new StringBuilder();
+                            try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(clientResponse.getBody(), java.nio.charset.StandardCharsets.UTF_8))) {
+                                String line;
+                                while ((line = reader.readLine()) != null) {
+                                    if (line.startsWith("data: ")) {
+                                        String data = line.substring(6).trim();
+                                        if ("[DONE]".equals(data)) break;
+                                        try {
+                                            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(data);
+                                            com.fasterxml.jackson.databind.JsonNode contentNode = node.path("choices").path(0).path("delta").path("content");
+                                            if (!contentNode.isMissingNode() && !contentNode.isNull()) {
+                                                String chunk = contentNode.asText();
+                                                sb.append(chunk);
+                                                onChunk.accept(chunk);
+                                            }
+                                        } catch (Exception e) {
+                                            // ignore parse errors for incomplete chunks
+                                        }
+                                    }
+                                }
+                            }
+                            return sb.toString();
+                        });
+            }
+
             log.info("<<< [LLM PLAN RESPONSE - {}]", name);
-            log.info("<<< Raw Content:\n{}", llmResponse.content());
-            String content = llmResponse.content().trim();
+            log.info("<<< Raw Content:\n{}", fullContent);
+            String content = fullContent.trim();
 
             if (content.startsWith("```json")) {
                 content = content.substring(7);
@@ -129,22 +280,22 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
                 if (content.endsWith("```")) content = content.substring(0, content.length() - 3);
             }
 
-            JsonNode root = objectMapper.readTree(content);
-            JsonNode stepsNode = root.path("steps");
+            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(content);
+            com.fasterxml.jackson.databind.JsonNode stepsNode = root.path("steps");
             List<String> steps = new ArrayList<>();
             if (stepsNode.isArray()) {
-                for (JsonNode n : stepsNode) {
+                for (com.fasterxml.jackson.databind.JsonNode n : stepsNode) {
                     steps.add(n.asText());
                 }
             }
             return new PlanResponseDTO(steps);
 
-        } catch (RestClientResponseException exception) {
+        } catch (org.springframework.web.client.RestClientResponseException exception) {
             handleRateLimit(exception);
             throw new LlmProviderException(name + " API plan request failed with status " + exception.getStatusCode() + ": " + exception.getResponseBodyAsString(), exception);
-        } catch (RestClientException exception) {
+        } catch (org.springframework.web.client.RestClientException exception) {
             throw new LlmProviderException(name + " API plan request failed (Connection error)", exception);
-        } catch (JsonProcessingException exception) {
+        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
             throw new LlmProviderException(name + " returned malformed JSON during planning", exception);
         }
     }

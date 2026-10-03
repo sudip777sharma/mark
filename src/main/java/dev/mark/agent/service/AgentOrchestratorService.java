@@ -193,7 +193,7 @@ LlmRouterService llmRouter,
         for (int i = 0; i < maxKeys; i++) {
             try {
                 state.incrementLlmRequestCount();
-                planResponse = llmRouter.plan(request);
+                planResponse = llmRouter.planStream(request, chunk -> taskSseService.broadcastThoughtChunk(chunk));
                 break;
             } catch (dev.mark.llm.exception.LlmProviderException e) {
                 if (e.getMessage() != null && e.getMessage().contains("429")) {
@@ -241,7 +241,7 @@ LlmRouterService llmRouter,
         try {
             setAction(state, "Thinking (Waiting for LLM)...");
             state.incrementLlmRequestCount();
-            LlmResponseDTO response = llmRouter.complete(request);
+            LlmResponseDTO response = llmRouter.completeStream(request, chunk -> taskSseService.broadcastThoughtChunk(chunk));
             setAction(state, "Analyzing LLM response...");
 
             if (response.toolCalls() != null && !response.toolCalls().isEmpty()) {

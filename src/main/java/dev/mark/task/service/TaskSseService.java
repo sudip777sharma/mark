@@ -56,5 +56,18 @@ public class TaskSseService {
             }
         }
     }
+
+    public void broadcastThoughtChunk(String chunk) {
+        if (emitters.isEmpty()) return;
+        for (SseEmitter emitter : emitters) {
+            try {
+                emitter.send(SseEmitter.event()
+                        .name("thought_chunk")
+                        .data(chunk));
+            } catch (IOException e) {
+                emitters.remove(emitter);
+            }
+        }
+    }
 }
 

@@ -38,8 +38,18 @@ public class LlmRouterService implements LlmProviderService {
     }
 
     @Override
+    public PlanResponseDTO planStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
+        return select(request).planStream(request, onChunk);
+    }
+
+    @Override
     public LlmResponseDTO complete(LlmRequestDTO request) {
         return select(request).complete(request);
+    }
+
+    @Override
+    public LlmResponseDTO completeStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
+        return select(request).completeStream(request, onChunk);
     }
 
     private LlmProviderService select(LlmRequestDTO request) {

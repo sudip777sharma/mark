@@ -29,6 +29,7 @@ export const LiveAgentCanvas: React.FC = () => {
   const streamLogs = useAgentStore((s) => s.streamLogs);
   const activePlan = useAgentStore((s) => s.activePlan);
   const isStreaming = useAgentStore((s) => s.isStreaming);
+  const llmThoughtStream = useAgentStore((s) => s.llmThoughtStream);
   
   const [expandAllSignal, setExpandAllSignal] = React.useState(0);
   const [collapseAllSignal, setCollapseAllSignal] = React.useState(0);
@@ -386,26 +387,52 @@ export const LiveAgentCanvas: React.FC = () => {
           <div
             style={{
               display: 'flex',
-              alignItems: 'center',
+              alignItems: 'flex-start',
               gap: '8px',
               padding: '10px 14px',
               color: 'var(--accent-cyan)',
               fontSize: '12px',
+              flexDirection: 'column',
+              width: '100%',
+              boxSizing: 'border-box'
             }}
           >
-            <Clock size={14} className="animate-spin" />
-            <span>
-              {activeTask?.currentAction ? (
-                <span>
-                  {activeTask.currentAction.replace(/\.+$/, '')}
-                  <AnimatedEllipsis />
-                </span>
-              ) : (
-                <span>
-                  Autonomous agent executing next step<AnimatedEllipsis />
-                </span>
-              )}
-            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Clock size={14} className="animate-spin" />
+              <span>
+                {activeTask?.currentAction ? (
+                  <span>
+                    {activeTask.currentAction.replace(/\.+$/, '')}
+                    <AnimatedEllipsis />
+                  </span>
+                ) : (
+                  <span>
+                    Autonomous agent executing next step<AnimatedEllipsis />
+                  </span>
+                )}
+              </span>
+            </div>
+
+            {(activeTask?.status === 'PLANNING' || activeTask?.status === 'EXECUTING') && llmThoughtStream && (
+              <div style={{
+                marginTop: '6px',
+                padding: '12px',
+                background: 'rgba(0,0,0,0.4)',
+                borderRadius: '6px',
+                border: '1px solid var(--border)',
+                color: 'var(--text-muted)',
+                fontFamily: 'monospace',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                width: '100%',
+                fontSize: '11px',
+                maxHeight: '200px',
+                overflowY: 'auto'
+              }}>
+                {llmThoughtStream}
+                <span className="animate-pulse" style={{ color: 'var(--accent-cyan)', marginLeft: '2px' }}>▍</span>
+              </div>
+            )}
           </div>
         )}
         <div ref={bottomRef} />

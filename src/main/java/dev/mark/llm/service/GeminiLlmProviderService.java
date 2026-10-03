@@ -52,6 +52,11 @@ public class GeminiLlmProviderService implements LlmProviderService {
 
     @Override
     public LlmResponseDTO complete(LlmRequestDTO request) {
+        return completeStream(request, null);
+    }
+
+    @Override
+    public LlmResponseDTO completeStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
         Long configId = request.configId();
         if (configId == null) {
             configId = llmSettingsService.getDefaultConfig().map(c -> c.getId()).orElse(null);
@@ -120,43 +125,72 @@ public class GeminiLlmProviderService implements LlmProviderService {
             log.info(">>> [GEMINI:REQ] model={} toolsCount={} historySize={} prompt='{}'",
                 model, declarations.size(), request.history().size(), promptSnippet);
 
-            GenerateContentResponse response = client.models.generateContent(
-                model,
-                contents,
-                configBuilder.build()
-            );
-
-            long duration = System.currentTimeMillis() - startTime;
-
-            if (response.candidates().isEmpty() || response.candidates().get().isEmpty()) {
-                log.warn("!!! [GEMINI:EMPTY] model={} durationMs={} returned zero candidates", model, duration);
-                throw new LlmProviderException("Gemini returned no candidates");
-            }
-
-            Content bestContent = response.candidates().get().get(0).content().orElse(null);
-            if (bestContent == null || bestContent.parts().isEmpty() || bestContent.parts().get().isEmpty()) {
-                log.info("<<< [GEMINI:RES] model={} durationMs={} bestContent is empty", model, duration);
-                return new LlmResponseDTO("", name(), false);
-            }
-
             StringBuilder textContent = new StringBuilder();
             List<LlmToolCallDTO> toolCalls = new ArrayList<>();
+            
+            if (onChunk == null) {
+                GenerateContentResponse response = client.models.generateContent(
+                    model,
+                    contents,
+                    configBuilder.build()
+                );
 
-            for (Part part : bestContent.parts().get()) {
-                if (part.text().isPresent()) {
-                    textContent.append(part.text().get());
+                if (response.candidates().isEmpty() || response.candidates().get().isEmpty()) {
+                    throw new LlmProviderException("Gemini returned no candidates");
                 }
-                if (part.functionCall().isPresent()) {
-                    FunctionCall fc = part.functionCall().get();
-                    String id = fc.id().orElse(java.util.UUID.randomUUID().toString());
-                    Map<String, Object> metadata = new java.util.HashMap<>();
-                    if (part.thoughtSignature().isPresent()) {
-                        metadata.put("gemini.thoughtSignature", part.thoughtSignature().get());
+
+                Content bestContent = response.candidates().get().get(0).content().orElse(null);
+                if (bestContent != null && bestContent.parts().isPresent() && !bestContent.parts().get().isEmpty()) {
+                    for (Part part : bestContent.parts().get()) {
+                        if (part.text().isPresent()) {
+                            textContent.append(part.text().get());
+                        }
+                        if (part.functionCall().isPresent()) {
+                            FunctionCall fc = part.functionCall().get();
+                            String id = fc.id().orElse(java.util.UUID.randomUUID().toString());
+                            Map<String, Object> metadata = new java.util.HashMap<>();
+                            if (part.thoughtSignature().isPresent()) {
+                                metadata.put("gemini.thoughtSignature", part.thoughtSignature().get());
+                            }
+                            toolCalls.add(new LlmToolCallDTO(id, fc.name().orElse(""), fc.args().orElse(Map.of()), metadata));
+                        }
                     }
-                    toolCalls.add(new LlmToolCallDTO(id, fc.name().orElse(""), fc.args().orElse(Map.of()), metadata));
+                }
+            } else {
+                com.google.genai.ResponseStream<GenerateContentResponse> stream = client.models.generateContentStream(
+                    model,
+                    contents,
+                    configBuilder.build()
+                );
+                for (GenerateContentResponse chunkResponse : stream) {
+                    chunkResponse.candidates().ifPresent(candidates -> {
+                        if (!candidates.isEmpty()) {
+                            candidates.get(0).content().ifPresent(c -> {
+                                c.parts().ifPresent(parts -> {
+                                    for (Part part : parts) {
+                                        if (part.text().isPresent()) {
+                                            String t = part.text().get();
+                                            textContent.append(t);
+                                            onChunk.accept(t);
+                                        }
+                                        if (part.functionCall().isPresent()) {
+                                            FunctionCall fc = part.functionCall().get();
+                                            String id = fc.id().orElse(java.util.UUID.randomUUID().toString());
+                                            Map<String, Object> metadata = new java.util.HashMap<>();
+                                            if (part.thoughtSignature().isPresent()) {
+                                                metadata.put("gemini.thoughtSignature", part.thoughtSignature().get());
+                                            }
+                                            toolCalls.add(new LlmToolCallDTO(id, fc.name().orElse(""), fc.args().orElse(Map.of()), metadata));
+                                        }
+                                    }
+                                });
+                            });
+                        }
+                    });
                 }
             }
 
+            long duration = System.currentTimeMillis() - startTime;
             log.info("<<< [GEMINI:RES] model={} durationMs={} textChars={} toolCallsCount={}",
                 model, duration, textContent.length(), toolCalls.size());
             for (LlmToolCallDTO tc : toolCalls) {
@@ -179,6 +213,11 @@ public class GeminiLlmProviderService implements LlmProviderService {
 
     @Override
     public PlanResponseDTO plan(LlmRequestDTO request) {
+        return planStream(request, null);
+    }
+
+    @Override
+    public PlanResponseDTO planStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
         Long configId = request.configId();
         if (configId == null) {
             configId = llmSettingsService.getDefaultConfig().map(c -> c.getId()).orElse(null);
@@ -233,26 +272,54 @@ public class GeminiLlmProviderService implements LlmProviderService {
             String goalSnippet = request.userPrompt() != null ? request.userPrompt() : "empty-goal";
             log.info(">>> [GEMINI:PLAN:REQ] model={} goal='{}'", model, goalSnippet);
 
-            GenerateContentResponse response = client.models.generateContent(
-                model,
-                contents,
-                configBuilder.build()
-            );
+            String json;
+            if (onChunk == null) {
+                GenerateContentResponse response = client.models.generateContent(
+                    model,
+                    contents,
+                    configBuilder.build()
+                );
+                
+                if (response.candidates().isEmpty() || response.candidates().get().isEmpty()) {
+                    throw new LlmProviderException("Gemini returned no candidates");
+                }
+                
+                Content bestContent = response.candidates().get().get(0).content().orElse(null);
+                if (bestContent == null || bestContent.parts().isEmpty() || bestContent.parts().get().isEmpty()) {
+                    json = "{}";
+                } else {
+                    json = bestContent.parts().get().get(0).text().orElse("{}");
+                }
+            } else {
+                com.google.genai.ResponseStream<GenerateContentResponse> stream = client.models.generateContentStream(
+                    model,
+                    contents,
+                    configBuilder.build()
+                );
+                
+                StringBuilder sb = new StringBuilder();
+                for (GenerateContentResponse chunkResponse : stream) {
+                    chunkResponse.candidates().ifPresent(candidates -> {
+                        if (!candidates.isEmpty()) {
+                            candidates.get(0).content().ifPresent(c -> {
+                                c.parts().ifPresent(parts -> {
+                                    if (!parts.isEmpty()) {
+                                        parts.get(0).text().ifPresent(text -> {
+                                            sb.append(text);
+                                            onChunk.accept(text);
+                                        });
+                                    }
+                                });
+                            });
+                        }
+                    });
+                }
+                json = sb.toString();
+            }
 
             long duration = System.currentTimeMillis() - startTime;
+            log.info("<<< [GEMINI:PLAN:RES] model={} durationMs={}", model, duration);
 
-            if (response.candidates().isEmpty() || response.candidates().get().isEmpty()) {
-                log.warn("!!! [GEMINI:PLAN:EMPTY] model={} durationMs={} returned zero candidates", model, duration);
-                throw new LlmProviderException("Gemini returned no candidates");
-            }
-
-            Content bestContent = response.candidates().get().get(0).content().orElse(null);
-            if (bestContent == null || bestContent.parts().isEmpty() || bestContent.parts().get().isEmpty()) {
-                log.info("<<< [GEMINI:PLAN:RES] model={} durationMs={} bestContent is empty", model, duration);
-                return new PlanResponseDTO(List.of());
-            }
-
-            String json = bestContent.parts().get().get(0).text().orElse("{}");
             ObjectMapper mapper = new ObjectMapper();
             JsonNode root = mapper.readTree(json);
             JsonNode stepsNode = root.path("steps");

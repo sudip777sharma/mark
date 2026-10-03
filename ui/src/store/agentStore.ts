@@ -38,6 +38,9 @@ interface AgentStoreState {
   // Streaming & Live Reasoning
   isStreaming: boolean;
   setIsStreaming: (streaming: boolean) => void;
+  llmThoughtStream: string;
+  appendLlmThoughtChunk: (chunk: string) => void;
+  clearLlmThoughtStream: () => void;
   streamLogs: StreamLogItem[];
   setStreamLogs: (logs: StreamLogItem[]) => void;
   addStreamLog: (item: StreamLogItem) => void;
@@ -93,6 +96,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
 
   isStreaming: false,
   setIsStreaming: (isStreaming) => set({ isStreaming }),
+  llmThoughtStream: '',
+  appendLlmThoughtChunk: (chunk) => set((state) => ({ llmThoughtStream: state.llmThoughtStream + chunk })),
+  clearLlmThoughtStream: () => set({ llmThoughtStream: '' }),
   streamLogs: [],
   setStreamLogs: (logs) => set({ streamLogs: logs }),
   addStreamLog: (item) => set((state) => ({ streamLogs: [...state.streamLogs, item] })),

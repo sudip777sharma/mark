@@ -32,5 +32,11 @@ import dev.mark.llm.exception.LlmProviderException;
 public interface LlmProviderService {
     String name();
     LlmResponseDTO complete(LlmRequestDTO request);
+    default LlmResponseDTO completeStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
+        return complete(request);
+    }
     PlanResponseDTO plan(LlmRequestDTO request);
+    default PlanResponseDTO planStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
+        return plan(request);
+    }
 }

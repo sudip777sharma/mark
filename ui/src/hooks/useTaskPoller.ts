@@ -11,6 +11,8 @@ export function useTaskPoller() {
   const addStreamLog = useAgentStore((s) => s.addStreamLog);
   const setActivePlan = useAgentStore((s) => s.setActivePlan);
   const setIsStreaming = useAgentStore((s) => s.setIsStreaming);
+  const appendLlmThoughtChunk = useAgentStore((s) => s.appendLlmThoughtChunk);
+  const clearLlmThoughtStream = useAgentStore((s) => s.clearLlmThoughtStream);
   const setVoiceState = useAgentStore((s) => s.setVoiceState);
   const setAgentSpeechText = useAgentStore((s) => s.setAgentSpeechText);
   const setWaitingUserInput = useAgentStore((s) => s.setWaitingUserInput);
@@ -19,6 +21,7 @@ export function useTaskPoller() {
   const seenStepsCountRef = useRef<number>(0);
   const lastTaskIdRef = useRef<string | null>(null);
   const lastStatusRef = useRef<string | null>(null);
+  const lastActionRef = useRef<string | null>(null);
 
   useEffect(() => {
     const taskId = activeTask?.taskId || activeTask?.id;
@@ -27,6 +30,7 @@ export function useTaskPoller() {
     if (lastTaskIdRef.current !== taskId) {
       lastTaskIdRef.current = taskId;
       lastStatusRef.current = activeTask?.status || null;
+      lastActionRef.current = activeTask?.currentAction || null;
       seenStepsCountRef.current = activeTask?.steps?.length || 0;
       addRawLog({
         level: 'INFO',
@@ -49,6 +53,12 @@ export function useTaskPoller() {
 
     const eventSource = new EventSource('/api/tasks/stream');
 
+    eventSource.addEventListener('thought_chunk', (event) => {
+      if (event.data) {
+        appendLlmThoughtChunk(event.data);
+      }
+    });
+
     eventSource.addEventListener('task_update', (event) => {
       try {
         const freshTask = JSON.parse(event.data);
@@ -65,10 +75,20 @@ export function useTaskPoller() {
 
         // Only fetch the full list if the status transitions (e.g. CREATED -> EXECUTING or EXECUTING -> COMPLETED)
         if (lastStatusRef.current !== freshTask.status) {
+            if (freshTask.status === 'PLANNING') {
+              clearLlmThoughtStream();
+            }
             lastStatusRef.current = freshTask.status;
             taskApi.listTasks().then((list) => {
               if (list.length > 0) setTasks(list);
             });
+        }
+        
+        if (lastActionRef.current !== freshTask.currentAction) {
+            if (freshTask.currentAction === 'Thinking (Waiting for LLM)...') {
+                clearLlmThoughtStream();
+            }
+            lastActionRef.current = freshTask.currentAction;
         }
 
         if (freshTask.plan && freshTask.plan.length > 0) {
