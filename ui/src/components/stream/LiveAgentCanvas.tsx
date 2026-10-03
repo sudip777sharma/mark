@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+﻿import React, { useEffect, useRef } from 'react';
 import { useAgentStore } from '../../store/agentStore';
 import { ToolCallCard } from './ToolCallCard';
 import {
@@ -373,7 +373,7 @@ export const LiveAgentCanvas: React.FC = () => {
                   {log.title}
                 </span>
                 {log.detail && (
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>â€” {log.detail}</span>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Ã¢â‚¬â€ {log.detail}</span>
                 )}
               </div>
               <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
@@ -413,7 +413,7 @@ export const LiveAgentCanvas: React.FC = () => {
               </span>
             </div>
 
-            {(activeTask?.status === 'PLANNING' || activeTask?.status === 'EXECUTING') && llmThoughtStream && (
+            {llmThoughtStream && (
               <div style={{
                 marginTop: '6px',
                 padding: '12px',
@@ -429,8 +429,11 @@ export const LiveAgentCanvas: React.FC = () => {
                 maxHeight: '200px',
                 overflowY: 'auto'
               }}>
-                {llmThoughtStream}
-                <span className="animate-pulse" style={{ color: 'var(--accent-cyan)', marginLeft: '2px' }}>▍</span>
+                <div style={{ marginBottom: '4px', fontWeight: 600, color: 'var(--accent-cyan)' }}>
+🧠 LLM Thought (Live):
+</div>
+{llmThoughtStream}
+                <span className="animate-pulse" style={{ color: 'var(--accent-cyan)', marginLeft: '2px' }}>â–</span>
               </div>
             )}
           </div>

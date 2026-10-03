@@ -138,7 +138,9 @@ export function useTaskPoller() {
               timestamp: stepTime,
               type: step.toolName ? 'tool:result' : 'agent:thinking',
               title: step.toolName ? `Tool: ${step.toolName}` : `Step ${step.stepNumber}`,
-              detail: (step.description && step.outcome) ? `${step.description}\n\nOutcome: ${step.outcome}` : (step.outcome || step.description),
+              detail: (step.description && step.outcome) 
+                ? `🧠 LLM Thought:\n${step.description}\n\n🔧 Tool Outcome:\n${step.outcome}` 
+                : (step.outcome || (step.description ? `🧠 LLM Thought:\n${step.description}` : '')),
               toolName: step.toolName,
               rawPayload: parsedArgs,
               successful:
