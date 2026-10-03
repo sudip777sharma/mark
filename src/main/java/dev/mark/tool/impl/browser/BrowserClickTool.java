@@ -10,26 +10,6 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 
-/**
- * **1. What the class does:**
- * Implements a browser automation tool that clicks on a web page element matching a specified CSS selector.
- *
- * **2. Why it is useful:**
- * Enables automated user interactions (such as clicking buttons, links, or checkboxes) during automated browser sessions.
- *
- * **3. How it fits in the flow of the application:**
- * Acts as a pluggable Spring-managed tool component within the application's tool execution framework, invoked dynamically by an orchestrator or agent.
- *
- * **4. Its methods and variables and how they are useful:**
- * - `browserSession` (variable): Maintains the state of the active browser session and pages.
- * - `name()`, `description()`, `parameterSchema()` (methods): Define the tool's metadata and input requirements (requires a "selector" string).
- * - `execute()` (method): Performs the click action on the active page and returns the execution result.
- *
- * **5. Its logic and how it gets fit into the overall application logic:**
- * - Logic: Verifies an active browser page exists, extracts and validates the CSS selector, performs the click, and handles any runtime exceptions.
- * - Integration: Fits into the overall logic by executing sequential browser interaction steps requested by the client application.
- */
-
 @Component
 public class BrowserClickTool implements Tool {
 
@@ -76,10 +56,26 @@ public class BrowserClickTool implements Tool {
 
         try {
             var page = browserSession.getCurrentPage();
+            
+            // Wait for element to be visible
+            page.waitForSelector(selector, new com.microsoft.playwright.Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.VISIBLE));
+            
             page.click(selector);
-            return new ToolResultDTO(true, "Clicked element matching selector: " + selector, Map.of());
+            
+            // Brief wait for any immediate UI reactions
+            try { Thread.sleep(1000); } catch (Exception ignored) {}
+            
+            String postUrl = page.url();
+            String title = page.title();
+            
+            return new ToolResultDTO(true, 
+                "Successfully clicked element matching selector: " + selector + "\n" +
+                "[Verification] Current URL: " + postUrl + "\n" +
+                "[Verification] Page Title: " + title + "\n" +
+                "(If the URL or Title didn't change as expected, the click might have been intercepted by a modal. Use browser_inspect to check.)", 
+                Map.of());
         } catch (Exception e) {
-            return new ToolResultDTO(false, "Failed to click element '" + selector + "': " + e.getMessage(), Map.of());
+            return new ToolResultDTO(false, "Failed to click element '" + selector + "': " + e.getMessage() + "\n(Hint: If Playwright says 'intercepts pointer events', a modal or loading spinner is covering the element. Use browser_inspect to see the Accessibility Tree and find the blocking element.)", Map.of());
         }
     }
 }

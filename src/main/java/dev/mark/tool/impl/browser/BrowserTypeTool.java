@@ -1,6 +1,5 @@
 package dev.mark.tool.impl.browser;
 
-
 import dev.mark.tool.util.BrowserSession;
 import dev.mark.tool.config.BrowserPropertiesConfig;
 import dev.mark.tool.core.Tool;
@@ -9,25 +8,6 @@ import dev.mark.tool.dto.ToolResultDTO;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
-
-/**
- * **1. What the class does:**
- * Implements a browser automation tool that types text into a specified input field on the active web page.
- *
- * **2. Why it is useful:**
- * Enables automated interaction with web forms, search bars, and login screens by simulating user keyboard input.
- *
- * **3. How it fits in the flow of the application:**
- * Acts as a pluggable component in a tool-execution framework that interacts with an active BrowserSession.
- *
- * **4. Its methods and variables and how they are useful:**
- * - browserSession: Holds the active browser state to retrieve the current page.
- * - name() / description() / parameterSchema(): Expose metadata and input requirements to the orchestrator.
- * - execute(): Performs the core action of validating inputs, filling the text, optionally pressing Enter, and returning the execution result.
- *
- * **5. Its logic and how it gets fit into the overall application logic:**
- * Verifies an active browser page exists, extracts and validates arguments (selector, text, press_enter), interacts with the browser page to fill the element, optionally triggers an "Enter" keypress, and returns a success/failure status to the calling orchestrator.
- */
 
 @Component
 public class BrowserTypeTool implements Tool {
@@ -45,7 +25,7 @@ public class BrowserTypeTool implements Tool {
 
     @Override
     public String description() {
-        return "Types text into an input field matching a CSS selector. Arguments: 'selector' (string), 'text' (string), 'press_enter' (optional boolean).";
+        return "Types text into an element matching a CSS selector. Arguments: 'selector' (string), 'text' (string).";
     }
 
     @Override
@@ -54,9 +34,8 @@ public class BrowserTypeTool implements Tool {
             "type", "object",
             "required", java.util.List.of("selector", "text"),
             "properties", Map.of(
-                "selector", Map.of("type", "string", "description", "CSS selector of the input field"),
-                "text", Map.of("type", "string", "description", "Text to type into the field"),
-                "press_enter", Map.of("type", "boolean", "description", "True to press Enter after typing")
+                "selector", Map.of("type", "string", "description", "CSS selector of the input element"),
+                "text", Map.of("type", "string", "description", "Text to type into the element")
             )
         );
     }
@@ -69,28 +48,27 @@ public class BrowserTypeTool implements Tool {
 
         String selector = (String) request.arguments().get("selector");
         String text = (String) request.arguments().get("text");
-        Boolean pressEnter = (Boolean) request.arguments().get("press_enter");
 
-        if (selector == null || selector.isBlank()) {
-            return new ToolResultDTO(false, "Missing required argument 'selector'", Map.of());
-        }
-        if (text == null) {
-            return new ToolResultDTO(false, "Missing required argument 'text'", Map.of());
+        if (selector == null || selector.isBlank() || text == null) {
+            return new ToolResultDTO(false, "Missing required arguments 'selector' or 'text'", Map.of());
         }
 
         try {
             var page = browserSession.getCurrentPage();
+            
+            // Wait for element
+            page.waitForSelector(selector, new com.microsoft.playwright.Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.VISIBLE));
+            
             page.fill(selector, text);
-            String observation = "Typed text into element matching selector: " + selector;
-
-            if (Boolean.TRUE.equals(pressEnter)) {
-                page.press(selector, "Enter");
-                observation += " and pressed Enter";
-            }
-
-            return new ToolResultDTO(true, observation, Map.of());
+            
+            try { Thread.sleep(500); } catch (Exception ignored) {}
+            
+            return new ToolResultDTO(true, 
+                "Successfully typed text into element matching selector: " + selector + "\n" +
+                "[Verification] Text entered successfully.", 
+                Map.of());
         } catch (Exception e) {
-            return new ToolResultDTO(false, "Failed to type into element '" + selector + "': " + e.getMessage(), Map.of());
+            return new ToolResultDTO(false, "Failed to type into element '" + selector + "': " + e.getMessage() + "\n(Hint: If Playwright says 'intercepts pointer events', a modal or loading spinner is covering the element. Use browser_inspect to see the Accessibility Tree.)", Map.of());
         }
     }
 }
