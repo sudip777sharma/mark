@@ -2,6 +2,7 @@ package dev.mark.llm.service;
 
 import dev.mark.llm.dto.*;
 import dev.mark.llm.exception.LlmProviderException;
+import dev.mark.task.entity.LlmInteractionLogEntity;
 import dev.mark.task.repository.LlmInteractionLogRepository;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -99,10 +100,27 @@ public class LlmRouterService implements LlmProviderService {
                 }
             }
             
-            dev.mark.task.entity.LlmInteractionLogEntity log = new dev.mark.task.entity.LlmInteractionLogEntity(
+            StringBuilder fullPrompt = new StringBuilder();
+            if (req.systemPrompt() != null && !req.systemPrompt().isBlank()) {
+                fullPrompt.append("=== SYSTEM PROMPT ===\n").append(req.systemPrompt()).append("\n\n");
+            }
+            if (req.history() != null && !req.history().isEmpty()) {
+                fullPrompt.append("=== CONVERSATION HISTORY ===\n");
+                try {
+                    fullPrompt.append(objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(req.history()));
+                } catch (Exception e) {
+                    for (LlmMessageDTO m : req.history()) {
+                        fullPrompt.append("[").append(m.role()).append("]: ").append(m.content()).append("\n");
+                    }
+                }
+            } else if (req.userPrompt() != null) {
+                fullPrompt.append(req.userPrompt());
+            }
+
+            LlmInteractionLogEntity log = new LlmInteractionLogEntity(
                 req.taskId(), 
                 req.phase() != null ? req.phase() : "Unspecified", 
-                req.userPrompt(), 
+                fullPrompt.toString(), 
                 thought, 
                 response
             );
