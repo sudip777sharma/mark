@@ -2,6 +2,7 @@ package dev.mark.task.service;
 
 import dev.mark.task.dto.TaskResponseDTO;
 import dev.mark.task.entity.TaskEntity;
+import dev.mark.task.repository.LlmInteractionLogRepository;
 import dev.mark.agent.model.AgentStepModel;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,12 +11,18 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 @Service
 public class TaskSseService {
     private static final Logger log = LoggerFactory.getLogger(TaskSseService.class);
     private final List<SseEmitter> emitters = new CopyOnWriteArrayList<>();
+    private final LlmInteractionLogRepository llmLogRepository;
+
+    public TaskSseService(LlmInteractionLogRepository llmLogRepository) {
+        this.llmLogRepository = llmLogRepository;
+    }
 
     public SseEmitter createEmitter() {
         SseEmitter emitter = new SseEmitter(Long.MAX_VALUE); // Infinite timeout
@@ -35,6 +42,29 @@ public class TaskSseService {
                 .map(s -> new AgentStepModel(s.getStepNumber(), s.getDescription(), s.getToolName(), s.getToolArguments(), s.getOutcome(), s.getProvider(), s.getTimestamp()))
                 .toList();
 
+        List<AgentStepModel> mutableSteps = new java.util.ArrayList<>(steps);
+        
+        llmLogRepository.findByTaskIdOrderByCreatedAtAsc(entity.getId().toString()).forEach(log -> {
+            String desc = log.getThinking() != null ? log.getThinking() : "";
+            String outcome = log.getResponse() != null ? log.getResponse() : "";
+            String toolArgs = log.getPrompt() != null ? "{\"prompt\": \"" + log.getPrompt().substring(0, Math.min(log.getPrompt().length(), 100)).replace("\n", "\\n").replace("\"", "\\\"") + "...\"}" : "{}";
+            mutableSteps.add(new AgentStepModel(
+                    -1,
+                    desc,
+                    "LLM: " + log.getPhase(),
+                    toolArgs,
+                    outcome,
+                    "system",
+                    log.getCreatedAt()
+            ));
+        });
+
+        mutableSteps.sort(java.util.Comparator.comparing(s -> s.timestamp() != null ? s.timestamp() : java.time.Instant.MIN));
+        for (int i = 0; i < mutableSteps.size(); i++) {
+            AgentStepModel s = mutableSteps.get(i);
+            mutableSteps.set(i, new AgentStepModel(i + 1, s.description(), s.toolName(), s.toolArguments(), s.outcome(), s.provider(), s.timestamp()));
+        }
+
         TaskResponseDTO response = new TaskResponseDTO(
                 entity.getId(),
                 entity.getGoal(),
@@ -43,7 +73,7 @@ public class TaskSseService {
                 entity.getCurrentAction(),
                 entity.getPlan(),
                 entity.getLlmRequestCount(),
-                steps
+                mutableSteps
         );
 
         for (SseEmitter emitter : emitters) {
@@ -70,4 +100,3 @@ public class TaskSseService {
         }
     }
 }
-

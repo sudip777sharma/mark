@@ -75,7 +75,7 @@ public class InteractionController {
         CompletableFuture.runAsync(() -> {
             try {
                 log.debug("Background intent classification starting for task {}", taskId);
-                InteractionResponseDTO routing = intentRouter.classifyAndRoute(userInput);
+                InteractionResponseDTO routing = intentRouter.classifyAndRoute(taskId.toString(), userInput);
                 
                 TaskEntity t = taskRepository.findById(taskId).orElse(null);
                 if (t == null) return;

@@ -133,20 +133,31 @@ export function useTaskPoller() {
               } catch(e) {}
             }
 
-            addStreamLog({
-              id: `${taskId}-step-${step.stepNumber}-${Date.now()}`,
-              timestamp: stepTime,
-              type: step.toolName ? 'tool:result' : 'agent:thinking',
-              title: step.toolName ? `Tool: ${step.toolName}` : `Step ${step.stepNumber}`,
-              detail: (step.description && step.outcome) 
-                ? `🧠 LLM Thought:\n${step.description}\n\n🔧 Tool Outcome:\n${step.outcome}` 
-                : (step.outcome || (step.description ? `🧠 LLM Thought:\n${step.description}` : '')),
-              toolName: step.toolName,
-              rawPayload: parsedArgs,
-              successful:
-                !step.outcome?.toLowerCase().includes('fail') &&
-                !step.outcome?.toLowerCase().includes('error'),
-            });
+            if (step.description) {
+              addStreamLog({
+                id: `${taskId}-step-${step.stepNumber}-${Date.now()}-thought`,
+                timestamp: stepTime,
+                type: 'agent:thinking',
+                title: `LLM Reasoning (Step ${step.stepNumber})`,
+                detail: step.description,
+                toolName: step.toolName,
+                rawPayload: parsedArgs,
+                successful: true,
+              });
+            }
+
+            if (step.outcome || step.toolName) {
+              addStreamLog({
+                id: `${taskId}-step-${step.stepNumber}-${Date.now()}-outcome`,
+                timestamp: stepTime,
+                type: 'tool:result',
+                title: step.toolName ? `Tool: ${step.toolName}` : `Step ${step.stepNumber}`,
+                detail: step.outcome || '',
+                toolName: step.toolName,
+                rawPayload: parsedArgs,
+                successful: !step.outcome?.toLowerCase().includes('fail') && !step.outcome?.toLowerCase().includes('error'),
+              });
+            }
           }
           seenStepsCountRef.current = currentSteps.length;
         }

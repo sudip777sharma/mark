@@ -13,6 +13,8 @@ application-local.yml
 mark-workspace/db/
 mark-workspace/screenshots/
 mark-workspace/*.png
+mark-workspace/*
+!mark-workspace/.gitkeep
 
 # Frontend dependencies and generated build output
 ui/node_modules/

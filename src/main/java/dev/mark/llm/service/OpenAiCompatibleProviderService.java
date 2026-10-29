@@ -174,6 +174,18 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
                         });
             }
 
+        } catch (org.springframework.web.client.RestClientResponseException exception) {
+            int status = exception.getStatusCode().value();
+            if (status == 429 || status == 402) {
+                String msg = exception.getResponseBodyAsString().toLowerCase();
+                if (msg.contains("free tier limit") || msg.contains("per day") || msg.contains("daily") || msg.contains("quota") || msg.contains("insufficient_quota") || msg.contains("insufficient balance")) {
+                    log.warn("!!! [OPENAI_COMPATIBLE:DAILY_QUOTA] Exhausted limit for provider '{}'. Message: {}. Deactivating key...", name, msg);
+                    if (configId != null && apiKey != null) {
+                        llmSettingsService.markKeyAsInactive(configId, apiKey);
+                    }
+                }
+            }
+            throw new LlmProviderException(name + " API request failed: " + exception.getMessage(), exception);
         } catch (RestClientException exception) {
             throw new LlmProviderException(name + " API request failed (Connection error)", exception);
         }

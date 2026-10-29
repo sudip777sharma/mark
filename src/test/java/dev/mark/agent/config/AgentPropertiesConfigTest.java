@@ -10,8 +10,8 @@ class AgentPropertiesConfigTest {
         AgentPropertiesConfig config = new AgentPropertiesConfig(30, null, null);
 
         assertEquals(30, config.maxSteps());
-        assertEquals(6, config.maxHistoryLength(), "Default history length should be 6");
-        assertEquals(20000, config.maxHistoryChars(), "Default history chars should be 20000");
+        assertEquals(100, config.maxHistoryLength(), "Default history length should be 100");
+        assertEquals(2000000, config.maxHistoryChars(), "Default history chars should be 2000000");
     }
 
     @Test

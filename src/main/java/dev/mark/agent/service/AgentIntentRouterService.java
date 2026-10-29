@@ -66,7 +66,7 @@ public class AgentIntentRouterService {
     /**
      * Evaluates the input and returns classification with direct response or task signal.
      */
-    public InteractionResponseDTO classifyAndRoute(String input) {
+    public InteractionResponseDTO classifyAndRoute(String taskId, String input) {
         if (input == null || input.isBlank()) {
             return InteractionResponseDTO.chat("I didn't catch that. How can I assist you?");
         }
@@ -76,6 +76,8 @@ public class AgentIntentRouterService {
         log.info(">>> [INTENT:EVAL] input='{}'", trimmed.length() > 80 ? trimmed.substring(0, 80) + "..." : trimmed);
 
         LlmRequestDTO request = new LlmRequestDTO(
+                taskId,
+                "Intent Classification",
                 null,
                 INTENT_SYSTEM_PROMPT,
                 "Classify this input:\n\"" + trimmed + "\"",

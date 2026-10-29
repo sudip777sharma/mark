@@ -35,7 +35,7 @@ class LlmRouterServiceTest {
 
     @BeforeEach
     void setUp() {
-        routerService = new LlmRouterService(geminiProvider, llmSettingsService, restClientBuilder, objectMapper);
+        routerService = new LlmRouterService(geminiProvider, llmSettingsService, restClientBuilder, objectMapper, org.mockito.Mockito.mock(dev.mark.task.repository.LlmInteractionLogRepository.class));
     }
 
     @Test
