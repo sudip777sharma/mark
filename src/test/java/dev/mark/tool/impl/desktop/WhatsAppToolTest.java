@@ -73,7 +73,6 @@ class WhatsAppToolTest {
         assertEquals("SENT", result.metadata().get("status"));
         assertEquals("Alice", result.metadata().get("contact"));
 
-        verify(desktopAutomation, atLeastOnce()).pressKeyCombination("WIN+UP");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("CTRL+F");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("CTRL+A");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("BACKSPACE");
@@ -214,6 +213,14 @@ class WhatsAppToolTest {
         assertTrue(resPlain.successful());
         assertTrue(resPlain.observation().contains("VERIFICATION PASSED"));
         assertEquals(Boolean.TRUE, resPlain.metadata().get("verified"));
+
+        // Case 4: Single JSON object without array brackets (PowerShell count == 1 serialization)
+        String singleObjectJson = "{\"id\":\"msg_single\",\"name\":\"You, hi, 3:24 PM, Sent\"}";
+        when(desktopAutomation.runPowershell(anyString())).thenReturn(singleObjectJson);
+        ToolResultDTO resSingle = whatsAppTool.execute(requestPlain);
+        assertTrue(resSingle.successful());
+        assertTrue(resSingle.observation().contains("VERIFICATION PASSED"));
+        assertEquals(Boolean.TRUE, resSingle.metadata().get("verified"));
     }
 
     @Test
@@ -230,12 +237,20 @@ class WhatsAppToolTest {
         assertTrue(emptyRes.observation().contains("No unread messages found"));
         assertEquals(0, emptyRes.metadata().get("unread_chats_count"));
 
-        // Case 2: Unreads present
+        // Case 2: Unreads present (JSON Array)
         String mockUnreadsJson = "[{\"id\":\"item_1\",\"name\":\"Alice, Hello, 10:15 AM, 2 unread messages\"}]";
         when(desktopAutomation.runPowershell(anyString())).thenReturn(mockUnreadsJson);
         ToolResultDTO unreadRes = whatsAppTool.execute(emptyRequest);
         assertTrue(unreadRes.successful());
         assertTrue(unreadRes.observation().contains("Found 1 chat(s) with unread messages"));
         assertEquals(1, unreadRes.metadata().get("unread_chats_count"));
+
+        // Case 3: Single unread object without array brackets
+        String singleUnreadObjectJson = "{\"id\":\"item_single\",\"name\":\"Alice, Hello, 10:15 AM, 2 unread messages\"}";
+        when(desktopAutomation.runPowershell(anyString())).thenReturn(singleUnreadObjectJson);
+        ToolResultDTO singleUnreadRes = whatsAppTool.execute(emptyRequest);
+        assertTrue(singleUnreadRes.successful());
+        assertTrue(singleUnreadRes.observation().contains("Found 1 chat(s) with unread messages"));
+        assertEquals(1, singleUnreadRes.metadata().get("unread_chats_count"));
     }
 }

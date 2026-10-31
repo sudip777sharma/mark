@@ -1,6 +1,7 @@
 package dev.mark.tool.impl.desktop;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mark.tool.core.Tool;
 import dev.mark.tool.dto.ToolRequestDTO;
@@ -160,8 +161,7 @@ public class WhatsAppTool implements Tool {
                 throw new IllegalStateException("Failed to bring WhatsApp Desktop to foreground. Ensure WhatsApp is installed.");
             }
         }
-        // Guarantee maximized two-pane desktop layout
-        desktopAutomation.pressKeyCombination("WIN+UP");
+        // Win32 SW_MAXIMIZE already maximizes to full width and height without triggering Windows 11 Snap
         Thread.sleep(150);
     }
 
@@ -247,7 +247,6 @@ public class WhatsAppTool implements Tool {
             launchWhatsAppProtocol("whatsapp://send?phone=" + digits);
             Thread.sleep(1200);
             desktopAutomation.ensureFocus("WhatsApp");
-            desktopAutomation.pressKeyCombination("WIN+UP");
             Thread.sleep(300);
         } else {
             searchAndSelectContact(contact);
@@ -274,14 +273,7 @@ public class WhatsAppTool implements Tool {
                 return new ToolResultDTO(false, rawJson, Map.of());
             }
 
-            List<Map<String, Object>> rawElements = List.of();
-            if (!rawJson.isBlank() && !rawJson.equals("[]")) {
-                try {
-                    rawElements = objectMapper.readValue(rawJson, new TypeReference<>() {});
-                } catch (Exception pe) {
-                    log.warn("Failed to parse unread UIA JSON: {}, raw: {}", pe.getMessage(), rawJson);
-                }
-            }
+            List<Map<String, Object>> rawElements = parseJsonElements(rawJson);
 
             List<WhatsAppUnreadChat> unreadChats = new ArrayList<>();
             Set<String> seenContacts = new HashSet<>();
@@ -348,14 +340,7 @@ public class WhatsAppTool implements Tool {
                 return new ToolResultDTO(false, rawJson, Map.of());
             }
 
-            List<Map<String, Object>> rawElements = List.of();
-            if (!rawJson.isBlank() && !rawJson.equals("[]")) {
-                try {
-                    rawElements = objectMapper.readValue(rawJson, new TypeReference<>() {});
-                } catch (Exception pe) {
-                    log.warn("Failed to parse conversation UIA JSON: {}, raw: {}", pe.getMessage(), rawJson);
-                }
-            }
+            List<Map<String, Object>> rawElements = parseJsonElements(rawJson);
 
             List<WhatsAppMessage> parsedMessages = new ArrayList<>();
             Set<String> seen = new HashSet<>();
@@ -456,6 +441,31 @@ public class WhatsAppTool implements Tool {
                 expectedMessage, contact != null ? contact : "active_chat"
             );
             return new ToolResultDTO(false, summary + "\n\nRecent conversation messages:\n" + formatMessages(recentMessages), metadata);
+        }
+    }
+
+    /**
+     * Safely deserializes UIA JSON string into a list of elements.
+     * Supports both JSON arrays [...] and single JSON objects {...} (which PowerShell outputs when count == 1).
+     */
+    List<Map<String, Object>> parseJsonElements(String rawJson) {
+        if (rawJson == null || rawJson.isBlank() || rawJson.equals("[]")) {
+            return List.of();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(rawJson);
+            List<Map<String, Object>> list = new ArrayList<>();
+            if (root.isArray()) {
+                for (JsonNode n : root) {
+                    list.add(objectMapper.convertValue(n, new TypeReference<>() {}));
+                }
+            } else if (root.isObject()) {
+                list.add(objectMapper.convertValue(root, new TypeReference<>() {}));
+            }
+            return list;
+        } catch (Exception e) {
+            log.warn("Failed to parse JSON elements: {}, raw: {}", e.getMessage(), rawJson);
+            return List.of();
         }
     }
 
@@ -663,7 +673,8 @@ public class WhatsAppTool implements Tool {
             "}",
             "",
             "if ($items.Count -gt 0) {",
-            "  $items | ConvertTo-Json -Compress",
+            "  $json = $items | ConvertTo-Json -Compress",
+            "  if ($json.StartsWith('{')) { \"[$json]\" } else { $json }",
             "} else {",
             "  Write-Output '[]'",
             "}"
@@ -765,7 +776,8 @@ public class WhatsAppTool implements Tool {
             "}",
             "",
             "if ($items.Count -gt 0) {",
-            "  $items | ConvertTo-Json -Compress",
+            "  $json = $items | ConvertTo-Json -Compress",
+            "  if ($json.StartsWith('{')) { \"[$json]\" } else { $json }",
             "} else {",
             "  Write-Output '[]'",
             "}"
