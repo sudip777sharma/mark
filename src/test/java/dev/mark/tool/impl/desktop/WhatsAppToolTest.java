@@ -139,16 +139,40 @@ class WhatsAppToolTest {
     @Test
     void testParseMessageElement() {
         WhatsAppTool.WhatsAppMessage outgoing = whatsAppTool.parseMessageElement("You, hi, 3:24 PM, Sent", "8280901077");
+        assertTrue(outgoing.fromMe());
         assertEquals("You", outgoing.sender());
         assertEquals("hi", outgoing.text());
         assertEquals("3:24 PM", outgoing.timestamp());
         assertEquals("Sent", outgoing.status());
 
         WhatsAppTool.WhatsAppMessage incoming = whatsAppTool.parseMessageElement("8280901077, sounds good!, 3:25 PM", "8280901077");
+        assertFalse(incoming.fromMe());
         assertEquals("8280901077", incoming.sender());
         assertEquals("sounds good!", incoming.text());
         assertEquals("3:25 PM", incoming.timestamp());
         assertEquals("Received", incoming.status());
+
+        // Group chat message from another member
+        WhatsAppTool.WhatsAppMessage groupMember = whatsAppTool.parseMessageElement("Himabindu Infosys, Okay, 1:49 AM", "Team Group");
+        assertFalse(groupMember.fromMe());
+        assertEquals("Himabindu Infosys", groupMember.sender());
+        assertEquals("Okay", groupMember.text());
+        assertEquals("1:49 AM", groupMember.timestamp());
+    }
+
+    @Test
+    void testOpenChatPhoneNumber() {
+        when(desktopAutomation.ensureFocus(anyString())).thenReturn(ToolResultDTO.success("Focus verified"));
+
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_automation", Map.of(
+            "action", "open_chat",
+            "contact", "8280901077"
+        ));
+
+        ToolResultDTO result = whatsAppTool.execute(request);
+        assertTrue(result.successful());
+        assertTrue(result.observation().contains("Successfully opened WhatsApp chat with '8280901077'"));
+        assertEquals("OPENED", result.metadata().get("status"));
     }
 
     @Test

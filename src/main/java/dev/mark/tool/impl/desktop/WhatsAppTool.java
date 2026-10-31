@@ -36,7 +36,7 @@ public class WhatsAppTool implements Tool {
         this.objectMapper = objectMapper;
     }
 
-    public record WhatsAppMessage(String sender, String text, String timestamp, String status, String raw) {}
+    public record WhatsAppMessage(boolean fromMe, String sender, String text, String timestamp, String status, String raw) {}
     public record WhatsAppUnreadChat(String contact, int unreadCount, String lastSnippet, String timestamp, String raw) {}
 
     @Override
@@ -153,9 +153,7 @@ public class WhatsAppTool implements Tool {
         ToolResultDTO focusResult = desktopAutomation.ensureFocus("WhatsApp");
         if (!focusResult.successful()) {
             log.info("WhatsApp window not in foreground, attempting protocol launch...");
-            new ProcessBuilder("powershell.exe", "-NoProfile", "-Command", "Start-Process 'whatsapp:'")
-                .start()
-                .waitFor();
+            launchWhatsAppProtocol("whatsapp:");
             Thread.sleep(2000);
             focusResult = desktopAutomation.ensureFocus("WhatsApp");
             if (!focusResult.successful()) {
@@ -165,6 +163,16 @@ public class WhatsAppTool implements Tool {
         // Guarantee maximized two-pane desktop layout
         desktopAutomation.pressKeyCombination("WIN+UP");
         Thread.sleep(150);
+    }
+
+    void launchWhatsAppProtocol(String uri) {
+        try {
+            new ProcessBuilder("powershell.exe", "-NoProfile", "-Command", "Start-Process '" + uri + "'")
+                .start()
+                .waitFor();
+        } catch (Exception e) {
+            log.warn("Failed to launch WhatsApp protocol '{}': {}", uri, e.getMessage());
+        }
     }
 
     /**
@@ -196,12 +204,13 @@ public class WhatsAppTool implements Tool {
     }
 
     /**
-     * Executes the deterministic 6-step send_message sequence.
+     * Executes the deterministic send_message sequence.
      */
-    private ToolResultDTO executeSendMessage(String contact, String message) throws InterruptedException {
+    private ToolResultDTO executeSendMessage(String contact, String message) throws Exception {
         log.info("Executing WhatsApp send_message to '{}'", contact);
 
-        searchAndSelectContact(contact);
+        executeOpenChat(contact);
+        Thread.sleep(300);
 
         // Inject message content into clipboard and paste
         DesktopAutomationTool.setClipboardText(message);
@@ -222,11 +231,27 @@ public class WhatsAppTool implements Tool {
 
     /**
      * Executes open_chat to focus a contact conversation without sending a message.
+     * Uses native Windows WhatsApp protocol for phone numbers, and UI search for names/groups.
      */
-    private ToolResultDTO executeOpenChat(String contact) throws InterruptedException {
+    private ToolResultDTO executeOpenChat(String contact) throws Exception {
         log.info("Executing WhatsApp open_chat for '{}'", contact);
 
-        searchAndSelectContact(contact);
+        if (contact == null || contact.isBlank()) {
+            return new ToolResultDTO(false, "Contact is required for 'open_chat'", Map.of());
+        }
+
+        String digits = contact.replaceAll("[^0-9]", "");
+        // If contact is a phone number (e.g. 8280901077 or +91 82809 01077, 7+ digits)
+        if (digits.length() >= 7 && contact.matches("^[\\+]?[0-9\\s\\-\\(\\)]{7,}$")) {
+            log.info("Contact '{}' detected as phone number ({} digits), using native WhatsApp protocol...", contact, digits);
+            launchWhatsAppProtocol("whatsapp://send?phone=" + digits);
+            Thread.sleep(1200);
+            desktopAutomation.ensureFocus("WhatsApp");
+            desktopAutomation.pressKeyCombination("WIN+UP");
+            Thread.sleep(300);
+        } else {
+            searchAndSelectContact(contact);
+        }
 
         return new ToolResultDTO(
             true,
@@ -348,18 +373,42 @@ public class WhatsAppTool implements Tool {
             int startIndex = Math.max(0, parsedMessages.size() - limit);
             List<WhatsAppMessage> recentMessages = parsedMessages.subList(startIndex, parsedMessages.size());
 
+            WhatsAppMessage lastMessage = recentMessages.isEmpty() ? null : recentMessages.get(recentMessages.size() - 1);
+            WhatsAppMessage lastFromMe = null;
+            WhatsAppMessage lastFromThem = null;
+            for (int i = recentMessages.size() - 1; i >= 0; i--) {
+                WhatsAppMessage m = recentMessages.get(i);
+                if (m.fromMe() && lastFromMe == null) {
+                    lastFromMe = m;
+                } else if (!m.fromMe() && lastFromThem == null) {
+                    lastFromThem = m;
+                }
+                if (lastFromMe != null && lastFromThem != null) break;
+            }
+
             Map<String, Object> metadata = new HashMap<>();
             metadata.put("action", "read_chat");
             metadata.put("contact", contact != null ? contact : "active_chat");
             metadata.put("count", recentMessages.size());
             metadata.put("messages", recentMessages);
+            if (lastMessage != null) metadata.put("last_message", lastMessage);
+            if (lastFromMe != null) metadata.put("last_from_me", lastFromMe);
+            if (lastFromThem != null) metadata.put("last_from_them", lastFromThem);
 
             if (expectedMessage != null && !expectedMessage.isBlank()) {
                 return evaluateVerification(recentMessages, expectedMessage, contact, metadata);
             }
 
-            String summary = String.format("Successfully read %d recent message(s) from conversation history:", recentMessages.size());
-            return new ToolResultDTO(true, summary + "\n" + formatMessages(recentMessages), metadata);
+            StringBuilder summary = new StringBuilder();
+            summary.append(String.format("Successfully read %d recent message(s) from conversation history:\n", recentMessages.size()));
+            if (lastFromMe != null) {
+                summary.append(String.format("- Last message from my side: \"%s\" [%s, Status: %s]\n", lastFromMe.text(), lastFromMe.timestamp(), lastFromMe.status()));
+            }
+            if (lastFromThem != null) {
+                summary.append(String.format("- Last message from their side: \"%s\" [%s, by %s]\n", lastFromThem.text(), lastFromThem.timestamp(), lastFromThem.sender()));
+            }
+            summary.append("\nAll messages:\n").append(formatMessages(recentMessages));
+            return new ToolResultDTO(true, summary.toString().trim(), metadata);
 
         } catch (Exception e) {
             log.error("Failed to read WhatsApp conversation", e);
@@ -395,9 +444,10 @@ public class WhatsAppTool implements Tool {
 
         if (verified) {
             metadata.put("matched_message", matchedMessage);
+            String sideStr = matchedMessage.fromMe() ? "My Side" : "Their Side";
             String summary = String.format(
-                "VERIFICATION PASSED: Confirmed message \"%s\" exists in WhatsApp chat history with '%s'! (Sender: %s, Time: %s, Status: %s)",
-                expectedMessage, contact != null ? contact : "active_chat", matchedMessage.sender(), matchedMessage.timestamp(), matchedMessage.status()
+                "VERIFICATION PASSED: Confirmed message \"%s\" exists in WhatsApp chat history with '%s'! [Side: %s, Sender: %s, Time: %s, Status: %s]",
+                expectedMessage, contact != null ? contact : "active_chat", sideStr, matchedMessage.sender(), matchedMessage.timestamp(), matchedMessage.status()
             );
             return new ToolResultDTO(true, summary + "\n\nRecent conversation messages:\n" + formatMessages(recentMessages), metadata);
         } else {
@@ -456,6 +506,7 @@ public class WhatsAppTool implements Tool {
 
     /**
      * Parses raw accessible message text into structured message records.
+     * Identifies whether the message is from your side (You / Outgoing) or their side (Incoming / Group Member).
      */
     public WhatsAppMessage parseMessageElement(String rawName, String targetContact) {
         String sender = "Unknown";
@@ -478,7 +529,8 @@ public class WhatsAppTool implements Tool {
             status = "Pending";
         }
 
-        if (rawName.startsWith("You,") || rawName.startsWith("You:") || rawName.startsWith("you,") || rawName.startsWith("you:")) {
+        boolean fromMe = lower.startsWith("you,") || lower.startsWith("you:");
+        if (fromMe) {
             sender = "You";
             if ("Received".equals(status)) status = "Sent";
         } else if (targetContact != null && !targetContact.isBlank() && rawName.startsWith(targetContact)) {
@@ -487,7 +539,9 @@ public class WhatsAppTool implements Tool {
 
         String[] parts = rawName.split(",");
         if (parts.length >= 2) {
-            sender = parts[0].trim();
+            if (!fromMe) {
+                sender = parts[0].trim();
+            }
             List<String> contentParts = new ArrayList<>();
             for (int i = 1; i < parts.length; i++) {
                 String p = parts[i].trim();
@@ -505,10 +559,10 @@ public class WhatsAppTool implements Tool {
             }
             String text = String.join(", ", contentParts);
             if (text.isBlank()) text = rawName;
-            return new WhatsAppMessage(sender, text, timestamp, status, rawName);
+            return new WhatsAppMessage(fromMe, sender, text, timestamp, status, rawName);
         }
 
-        return new WhatsAppMessage(sender, rawName, timestamp, status, rawName);
+        return new WhatsAppMessage(fromMe, sender, rawName, timestamp, status, rawName);
     }
 
     private String formatMessages(List<WhatsAppMessage> messages) {
@@ -518,14 +572,16 @@ public class WhatsAppTool implements Tool {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < messages.size(); i++) {
             WhatsAppMessage m = messages.get(i);
-            sb.append(String.format("%d. [%s] %s: %s",
+            String side = m.fromMe() ? "[My Side]" : "[Their Side]";
+            sb.append(String.format("%d. %s [%s] %s: %s",
                 i + 1,
+                side,
                 m.timestamp().isBlank() ? "Recent" : m.timestamp(),
                 m.sender(),
                 m.text()
             ));
-            if ("You".equalsIgnoreCase(m.sender())) {
-                sb.append(String.format(" (%s)", m.status()));
+            if (m.fromMe()) {
+                sb.append(String.format(" (Status: %s)", m.status()));
             }
             sb.append("\n");
         }
@@ -693,9 +749,10 @@ public class WhatsAppTool implements Tool {
             "  if ($ignoreList -contains $trimmed) { continue }",
             "  if ($ct -in @('ControlType.TitleBar', 'ControlType.MenuBar', 'ControlType.Menu', 'ControlType.ScrollBar', 'ControlType.Thumb', 'ControlType.Separator', 'ControlType.SemanticZoom')) { continue }",
             "",
-            "  # Geometric filter: strictly enforce conversation pane (right of split)",
+            "  # Do not drop elements if rect is empty (WinUI 3 virtualized text blocks report IsEmpty=true)",
+            "  # Only filter out elements if bounding rectangle is explicitly known and inside left sidebar",
             "  $rect = $item.Current.BoundingRectangle",
-            "  if ($rect.IsEmpty -or $rect.X -lt $splitX) { continue }",
+            "  if (-not $rect.IsEmpty -and $rect.Width -gt 0 -and $rect.X -lt $splitX) { continue }",
             "",
             "  # Filter out standalone delivery indicators",
             "  if ($trimmed -in @('Sent', 'Delivered', 'Read', 'Pending', 'Seen')) { continue }",
