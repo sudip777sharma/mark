@@ -17,7 +17,8 @@ import java.util.regex.Pattern;
  * Deterministic automation tool for WhatsApp Desktop on Windows.
  *
  * <p>Automates native WhatsApp Desktop using focus-aware Win32 activation,
- * native keyboard shortcuts, Windows system clipboard injection, and
+ * search-sanitized navigation, Windows system clipboard injection,
+ * geometric pane separation (Sidebar vs Conversation), and
  * accessibility-based chat reading and verification.
  */
 @Component
@@ -25,6 +26,7 @@ public class WhatsAppTool implements Tool {
 
     private static final Logger log = LoggerFactory.getLogger(WhatsAppTool.class);
     private static final Pattern TIME_PATTERN = Pattern.compile("\\b(\\d{1,2}:\\d{2}\\s*(?:AM|PM|am|pm)?)\\b");
+    private static final Pattern UNREAD_PATTERN = Pattern.compile("(?i)\\b(\\d+)\\s*unread\\b");
 
     private final DesktopAutomationTool desktopAutomation;
     private final ObjectMapper objectMapper;
@@ -35,6 +37,7 @@ public class WhatsAppTool implements Tool {
     }
 
     public record WhatsAppMessage(String sender, String text, String timestamp, String status, String raw) {}
+    public record WhatsAppUnreadChat(String contact, int unreadCount, String lastSnippet, String timestamp, String raw) {}
 
     @Override
     public String name() {
@@ -44,14 +47,12 @@ public class WhatsAppTool implements Tool {
     @Override
     public String description() {
         return "Deterministic automation skill for WhatsApp Desktop on Windows. "
-             + "Actions supported: 'send_message' (send text/emojis to a contact), "
-             + "'open_chat' (focus a conversation without sending), "
-             + "'read_chat' (extract recent messages from chat, also acts as verifier for send_message). "
-             + "Arguments: 'action' (required: 'send_message', 'open_chat', or 'read_chat'), "
-             + "'contact' (contact name or phone number), "
-             + "'message' (required for 'send_message'), "
-             + "'expected_message' (optional for 'read_chat' to verify that a specific message was sent), "
-             + "'limit' (optional integer for 'read_chat', default: 10).";
+             + "Actions supported:\n"
+             + "1. 'send_message' (send text/emojis to a contact. Requires: 'contact', 'message')\n"
+             + "2. 'open_chat' (focus a conversation without sending. Requires: 'contact')\n"
+             + "3. 'read_chat' (read recent messages from the active conversation pane. Optional: 'contact', 'limit')\n"
+             + "4. 'list_unread_chats' (lists only chats that currently have pending unread messages. Optional: 'limit')\n"
+             + "5. 'verify_message' (READ-ONLY verifier. Checks if a message exists in the conversation history without sending anything. Requires: 'contact', 'expected_message').";
     }
 
     @Override
@@ -61,11 +62,11 @@ public class WhatsAppTool implements Tool {
             "properties", Map.of(
                 "action", Map.of(
                     "type", "string",
-                    "description", "WhatsApp action: 'send_message', 'open_chat', or 'read_chat'"
+                    "description", "WhatsApp action: 'send_message', 'open_chat', 'read_chat', 'list_unread_chats', or 'verify_message'"
                 ),
                 "contact", Map.of(
                     "type", "string",
-                    "description", "Contact name or phone number as saved or formatted in WhatsApp (required for send_message/open_chat, optional for read_chat)"
+                    "description", "Contact name or phone number (required for send_message, open_chat, verify_message; optional for read_chat)"
                 ),
                 "message", Map.of(
                     "type", "string",
@@ -73,11 +74,11 @@ public class WhatsAppTool implements Tool {
                 ),
                 "expected_message", Map.of(
                     "type", "string",
-                    "description", "Optional text to verify in chat history for 'read_chat' (closed-loop verification of send_message)"
+                    "description", "Text content to search/verify in conversation history (required for 'verify_message', optional for 'read_chat')"
                 ),
                 "limit", Map.of(
                     "type", "integer",
-                    "description", "Number of recent messages to read for 'read_chat' (default: 10)"
+                    "description", "Number of items to return (default: 10)"
                 )
             ),
             "required", List.of("action")
@@ -93,57 +94,60 @@ public class WhatsAppTool implements Tool {
         }
 
         String contact = (String) arguments.get("contact");
+        int limit = arguments.containsKey("limit") ? ((Number) arguments.get("limit")).intValue() : 10;
 
-        // Validate mandatory parameters for specific actions
-        if ("send_message".equalsIgnoreCase(action)) {
-            if (contact == null || contact.isBlank()) {
-                return new ToolResultDTO(false, "Argument 'contact' is required for 'send_message'.", Map.of());
-            }
-            String message = (String) arguments.get("message");
-            if (message == null || message.isBlank()) {
-                return new ToolResultDTO(false, "Argument 'message' is required for 'send_message'.", Map.of());
-            }
-            return executeSendMessageWrapper(contact, message);
-        }
-
-        if ("open_chat".equalsIgnoreCase(action)) {
-            if (contact == null || contact.isBlank()) {
-                return new ToolResultDTO(false, "Argument 'contact' is required for 'open_chat'.", Map.of());
-            }
-            return executeOpenChatWrapper(contact);
-        }
-
-        if ("read_chat".equalsIgnoreCase(action)) {
-            int limit = arguments.containsKey("limit") ? ((Number) arguments.get("limit")).intValue() : 10;
-            String expectedMessage = (String) arguments.get("expected_message");
-            return executeReadChat(contact, limit, expectedMessage);
-        }
-
-        return new ToolResultDTO(false, "Unsupported WhatsApp action: " + action, Map.of());
-    }
-
-    private ToolResultDTO executeSendMessageWrapper(String contact, String message) {
         try {
-            ensureWhatsAppReady();
-            return executeSendMessage(contact, message);
-        } catch (Exception e) {
-            log.error("WhatsApp send_message failed", e);
-            return new ToolResultDTO(false, "WhatsApp send_message failed: " + e.getMessage(), Map.of());
-        }
-    }
+            switch (action.toLowerCase()) {
+                case "send_message":
+                    if (contact == null || contact.isBlank()) {
+                        return new ToolResultDTO(false, "Argument 'contact' is required for 'send_message'.", Map.of());
+                    }
+                    String message = (String) arguments.get("message");
+                    if (message == null || message.isBlank()) {
+                        return new ToolResultDTO(false, "Argument 'message' is required for 'send_message'.", Map.of());
+                    }
+                    ensureWhatsAppReady();
+                    return executeSendMessage(contact, message);
 
-    private ToolResultDTO executeOpenChatWrapper(String contact) {
-        try {
-            ensureWhatsAppReady();
-            return executeOpenChat(contact);
+                case "open_chat":
+                    if (contact == null || contact.isBlank()) {
+                        return new ToolResultDTO(false, "Argument 'contact' is required for 'open_chat'.", Map.of());
+                    }
+                    ensureWhatsAppReady();
+                    return executeOpenChat(contact);
+
+                case "list_unread_chats":
+                    ensureWhatsAppReady();
+                    return executeListUnreadChats(limit);
+
+                case "read_chat":
+                    ensureWhatsAppReady();
+                    String expectedMessage = (String) arguments.get("expected_message");
+                    return executeReadChat(contact, limit, expectedMessage);
+
+                case "verify_message":
+                    if (contact == null || contact.isBlank()) {
+                        return new ToolResultDTO(false, "Argument 'contact' is required for 'verify_message'.", Map.of());
+                    }
+                    String expected = (String) arguments.get("expected_message");
+                    if (expected == null || expected.isBlank()) {
+                        return new ToolResultDTO(false, "Argument 'expected_message' is required for 'verify_message'.", Map.of());
+                    }
+                    ensureWhatsAppReady();
+                    return executeVerifyMessage(contact, expected, limit);
+
+                default:
+                    return new ToolResultDTO(false, "Unsupported WhatsApp action: " + action, Map.of());
+            }
+
         } catch (Exception e) {
-            log.error("WhatsApp open_chat failed", e);
-            return new ToolResultDTO(false, "WhatsApp open_chat failed: " + e.getMessage(), Map.of());
+            log.error("WhatsApp action '{}' failed", action, e);
+            return new ToolResultDTO(false, "WhatsApp action failed: " + e.getMessage(), Map.of());
         }
     }
 
     /**
-     * Brings WhatsApp to foreground or starts it if needed.
+     * Brings WhatsApp to foreground or launches it if needed.
      */
     private void ensureWhatsAppReady() throws Exception {
         ToolResultDTO focusResult = desktopAutomation.ensureFocus("WhatsApp");
@@ -161,30 +165,43 @@ public class WhatsAppTool implements Tool {
     }
 
     /**
+     * Sanitizes search input by selecting all existing text and backspacing before pasting.
+     */
+    private void searchAndSelectContact(String contact) throws InterruptedException {
+        // 1. Focus search bar via native shortcut Ctrl+F
+        desktopAutomation.pressKeyCombination("CTRL+F");
+        Thread.sleep(150);
+
+        // 2. Clear any residual text from previous searches (Ctrl+A -> Backspace)
+        desktopAutomation.pressKeyCombination("CTRL+A");
+        Thread.sleep(80);
+        desktopAutomation.pressKeyCombination("BACKSPACE");
+        Thread.sleep(80);
+
+        // 3. Paste clean contact query
+        DesktopAutomationTool.setClipboardText(contact);
+        desktopAutomation.pressKeyCombination("CTRL+V");
+        Thread.sleep(350);
+
+        // 4. Confirm selection with Enter and wait for conversation pane to settle
+        desktopAutomation.pressKeyCombination("ENTER");
+        Thread.sleep(500);
+    }
+
+    /**
      * Executes the deterministic 6-step send_message sequence.
      */
     private ToolResultDTO executeSendMessage(String contact, String message) throws InterruptedException {
         log.info("Executing WhatsApp send_message to '{}'", contact);
 
-        // 1. Focus search bar via native shortcut Ctrl+F
-        desktopAutomation.pressKeyCombination("CTRL+F");
-        Thread.sleep(250);
+        searchAndSelectContact(contact);
 
-        // 2. Select search and enter contact name
-        DesktopAutomationTool.setClipboardText(contact);
-        desktopAutomation.pressKeyCombination("CTRL+V");
-        Thread.sleep(350);
-
-        // 3. Confirm contact selection with Enter
-        desktopAutomation.pressKeyCombination("ENTER");
-        Thread.sleep(500);
-
-        // 4. Inject message content into clipboard and paste
+        // Inject message content into clipboard and paste
         DesktopAutomationTool.setClipboardText(message);
         desktopAutomation.pressKeyCombination("CTRL+V");
         Thread.sleep(200);
 
-        // 5. Dispatch message with Enter
+        // Dispatch message with Enter
         desktopAutomation.pressKeyCombination("ENTER");
         Thread.sleep(200);
 
@@ -202,15 +219,7 @@ public class WhatsAppTool implements Tool {
     private ToolResultDTO executeOpenChat(String contact) throws InterruptedException {
         log.info("Executing WhatsApp open_chat for '{}'", contact);
 
-        desktopAutomation.pressKeyCombination("CTRL+F");
-        Thread.sleep(250);
-
-        DesktopAutomationTool.setClipboardText(contact);
-        desktopAutomation.pressKeyCombination("CTRL+V");
-        Thread.sleep(350);
-
-        desktopAutomation.pressKeyCombination("ENTER");
-        Thread.sleep(400);
+        searchAndSelectContact(contact);
 
         return new ToolResultDTO(
             true,
@@ -220,21 +229,13 @@ public class WhatsAppTool implements Tool {
     }
 
     /**
-     * Extracts recent messages from the active conversation using Win32 UIA.
-     * Optionally performs closed-loop verification against expectedMessage.
+     * Lists ONLY chats in the sidebar that have pending unread message badges.
      */
-    public ToolResultDTO executeReadChat(String contact, int limit, String expectedMessage) {
-        log.info("Executing WhatsApp read_chat (contact={}, limit={}, expectedMessage={})", contact, limit, expectedMessage);
+    public ToolResultDTO executeListUnreadChats(int limit) {
+        log.info("Executing WhatsApp list_unread_chats (limit={})", limit);
 
         try {
-            ensureWhatsAppReady();
-
-            if (contact != null && !contact.isBlank()) {
-                executeOpenChat(contact);
-                Thread.sleep(400);
-            }
-
-            String script = buildChatExtractionScript();
+            String script = buildSidebarUnreadExtractionScript();
             String rawJson = desktopAutomation.runPowershell(script).trim();
 
             if (rawJson.startsWith("ERROR")) {
@@ -246,7 +247,81 @@ public class WhatsAppTool implements Tool {
                 try {
                     rawElements = objectMapper.readValue(rawJson, new TypeReference<>() {});
                 } catch (Exception pe) {
-                    log.warn("Failed to parse UIA JSON: {}, raw: {}", pe.getMessage(), rawJson);
+                    log.warn("Failed to parse unread UIA JSON: {}, raw: {}", pe.getMessage(), rawJson);
+                }
+            }
+
+            List<WhatsAppUnreadChat> unreadChats = new ArrayList<>();
+            Set<String> seenContacts = new HashSet<>();
+
+            for (Map<String, Object> el : rawElements) {
+                String name = (String) el.get("name");
+                if (name == null || name.isBlank()) continue;
+
+                WhatsAppUnreadChat chat = parseUnreadChatElement(name);
+                if (chat != null && seenContacts.add(chat.contact().toLowerCase())) {
+                    unreadChats.add(chat);
+                    if (unreadChats.size() >= limit) break;
+                }
+            }
+
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("action", "list_unread_chats");
+            metadata.put("unread_chats_count", unreadChats.size());
+            metadata.put("unread_chats", unreadChats);
+
+            if (unreadChats.isEmpty()) {
+                String observation = "No unread messages found in WhatsApp. All chats are currently caught up.";
+                return new ToolResultDTO(true, observation, metadata);
+            }
+
+            StringBuilder sb = new StringBuilder();
+            sb.append(String.format("Found %d chat(s) with unread messages in WhatsApp:\n", unreadChats.size()));
+            for (int i = 0; i < unreadChats.size(); i++) {
+                WhatsAppUnreadChat uc = unreadChats.get(i);
+                sb.append(String.format("%d. %s (%d unread message%s) [%s]: \"%s\"\n",
+                    i + 1,
+                    uc.contact(),
+                    uc.unreadCount(),
+                    uc.unreadCount() == 1 ? "" : "s",
+                    uc.timestamp().isBlank() ? "Recent" : uc.timestamp(),
+                    uc.lastSnippet()
+                ));
+            }
+
+            return new ToolResultDTO(true, sb.toString().trim(), metadata);
+
+        } catch (Exception e) {
+            log.error("Failed to list unread WhatsApp chats", e);
+            return new ToolResultDTO(false, "Failed to list unread WhatsApp chats: " + e.getMessage(), Map.of());
+        }
+    }
+
+    /**
+     * Extracts recent messages strictly from the conversation pane.
+     */
+    public ToolResultDTO executeReadChat(String contact, int limit, String expectedMessage) {
+        log.info("Executing WhatsApp read_chat (contact={}, limit={}, expectedMessage={})", contact, limit, expectedMessage);
+
+        try {
+            if (contact != null && !contact.isBlank()) {
+                executeOpenChat(contact);
+                Thread.sleep(400);
+            }
+
+            String script = buildConversationPaneExtractionScript();
+            String rawJson = desktopAutomation.runPowershell(script).trim();
+
+            if (rawJson.startsWith("ERROR")) {
+                return new ToolResultDTO(false, rawJson, Map.of());
+            }
+
+            List<Map<String, Object>> rawElements = List.of();
+            if (!rawJson.isBlank() && !rawJson.equals("[]")) {
+                try {
+                    rawElements = objectMapper.readValue(rawJson, new TypeReference<>() {});
+                } catch (Exception pe) {
+                    log.warn("Failed to parse conversation UIA JSON: {}, raw: {}", pe.getMessage(), rawJson);
                 }
             }
 
@@ -256,7 +331,7 @@ public class WhatsAppTool implements Tool {
             for (Map<String, Object> el : rawElements) {
                 String name = (String) el.get("name");
                 if (name == null || name.isBlank()) continue;
-                if (!seen.add(name)) continue; // avoid duplicates
+                if (!seen.add(name)) continue;
 
                 WhatsAppMessage msg = parseMessageElement(name, contact);
                 parsedMessages.add(msg);
@@ -272,64 +347,119 @@ public class WhatsAppTool implements Tool {
             metadata.put("count", recentMessages.size());
             metadata.put("messages", recentMessages);
 
-            // Closed-loop verification
             if (expectedMessage != null && !expectedMessage.isBlank()) {
-                boolean verified = false;
-                WhatsAppMessage matchedMessage = null;
-
-                for (int i = recentMessages.size() - 1; i >= 0; i--) {
-                    WhatsAppMessage m = recentMessages.get(i);
-                    if (m.text().toLowerCase().contains(expectedMessage.toLowerCase())
-                            || m.raw().toLowerCase().contains(expectedMessage.toLowerCase())) {
-                        verified = true;
-                        matchedMessage = m;
-                        break;
-                    }
-                }
-
-                metadata.put("verified", verified);
-                metadata.put("expected_message", expectedMessage);
-
-                if (verified) {
-                    metadata.put("matched_message", matchedMessage);
-                    String summary = String.format(
-                        "VERIFICATION PASSED: Message \"%s\" verified in WhatsApp chat history! (Sender: %s, Time: %s, Status: %s)",
-                        expectedMessage, matchedMessage.sender(), matchedMessage.timestamp(), matchedMessage.status()
-                    );
-                    return new ToolResultDTO(true, summary + "\n\nRecent messages:\n" + formatMessages(recentMessages), metadata);
-                } else {
-                    String summary = String.format(
-                        "VERIFICATION FAILED: Expected message \"%s\" was NOT found in recent chat messages.",
-                        expectedMessage
-                    );
-                    return new ToolResultDTO(false, summary + "\n\nRecent messages:\n" + formatMessages(recentMessages), metadata);
-                }
+                return evaluateVerification(recentMessages, expectedMessage, contact, metadata);
             }
 
-            String summary = String.format("Successfully read %d recent messages from WhatsApp chat:", recentMessages.size());
+            String summary = String.format("Successfully read %d recent message(s) from conversation history:", recentMessages.size());
             return new ToolResultDTO(true, summary + "\n" + formatMessages(recentMessages), metadata);
 
         } catch (Exception e) {
-            log.error("Failed to read WhatsApp chat", e);
-            return new ToolResultDTO(false, "Failed to read WhatsApp chat: " + e.getMessage(), Map.of());
+            log.error("Failed to read WhatsApp conversation", e);
+            return new ToolResultDTO(false, "Failed to read WhatsApp conversation: " + e.getMessage(), Map.of());
         }
     }
 
     /**
-     * Parses raw accessible text into structured message records.
+     * Strict read-only verification: checks if expectedMessage exists in the chat history.
+     * Absolutely never types or re-sends messages.
+     */
+    private ToolResultDTO executeVerifyMessage(String contact, String expectedMessage, int limit) {
+        log.info("Executing READ-ONLY verify_message for contact='{}', expected='{}'", contact, expectedMessage);
+        return executeReadChat(contact, limit, expectedMessage);
+    }
+
+    private ToolResultDTO evaluateVerification(List<WhatsAppMessage> recentMessages, String expectedMessage, String contact, Map<String, Object> metadata) {
+        boolean verified = false;
+        WhatsAppMessage matchedMessage = null;
+
+        for (int i = recentMessages.size() - 1; i >= 0; i--) {
+            WhatsAppMessage m = recentMessages.get(i);
+            if (m.text().toLowerCase().contains(expectedMessage.toLowerCase())
+                    || m.raw().toLowerCase().contains(expectedMessage.toLowerCase())) {
+                verified = true;
+                matchedMessage = m;
+                break;
+            }
+        }
+
+        metadata.put("verified", verified);
+        metadata.put("expected_message", expectedMessage);
+
+        if (verified) {
+            metadata.put("matched_message", matchedMessage);
+            String summary = String.format(
+                "VERIFICATION PASSED: Confirmed message \"%s\" exists in WhatsApp chat history with '%s'! (Sender: %s, Time: %s, Status: %s)",
+                expectedMessage, contact != null ? contact : "active_chat", matchedMessage.sender(), matchedMessage.timestamp(), matchedMessage.status()
+            );
+            return new ToolResultDTO(true, summary + "\n\nRecent conversation messages:\n" + formatMessages(recentMessages), metadata);
+        } else {
+            String summary = String.format(
+                "VERIFICATION FAILED: Message \"%s\" was NOT found in recent chat history with '%s'. (READ-ONLY check - no messages were sent)",
+                expectedMessage, contact != null ? contact : "active_chat"
+            );
+            return new ToolResultDTO(false, summary + "\n\nRecent conversation messages:\n" + formatMessages(recentMessages), metadata);
+        }
+    }
+
+    /**
+     * Parses an unread chat element from the sidebar.
+     * Example input: "Himabindu Infosys, Okay, 1:49 AM, 2 unread messages"
+     */
+    public WhatsAppUnreadChat parseUnreadChatElement(String rawName) {
+        Matcher unreadMatcher = UNREAD_PATTERN.matcher(rawName);
+        if (!unreadMatcher.find() && !rawName.toLowerCase().contains("unread")) {
+            return null; // Not an unread chat
+        }
+
+        int count = 1;
+        if (unreadMatcher.find(0)) {
+            try {
+                count = Integer.parseInt(unreadMatcher.group(1));
+            } catch (NumberFormatException ignored) {}
+        }
+
+        String contact = "Unknown";
+        String lastSnippet = "";
+        String timestamp = "";
+
+        Matcher timeMatcher = TIME_PATTERN.matcher(rawName);
+        if (timeMatcher.find()) {
+            timestamp = timeMatcher.group(1);
+        }
+
+        String[] parts = rawName.split(",");
+        if (parts.length >= 2) {
+            contact = parts[0].trim();
+            List<String> snippetParts = new ArrayList<>();
+            for (int i = 1; i < parts.length; i++) {
+                String p = parts[i].trim();
+                if (p.isBlank()) continue;
+                if (UNREAD_PATTERN.matcher(p).find() || p.toLowerCase().contains("unread")) continue;
+                if (TIME_PATTERN.matcher(p).matches()) continue;
+                snippetParts.add(p);
+            }
+            lastSnippet = String.join(", ", snippetParts);
+        } else {
+            contact = rawName.trim();
+        }
+
+        return new WhatsAppUnreadChat(contact, count, lastSnippet, timestamp, rawName);
+    }
+
+    /**
+     * Parses raw accessible message text into structured message records.
      */
     public WhatsAppMessage parseMessageElement(String rawName, String targetContact) {
         String sender = "Unknown";
         String timestamp = "";
         String status = "Received";
 
-        // Extract timestamp
         Matcher timeMatcher = TIME_PATTERN.matcher(rawName);
         if (timeMatcher.find()) {
             timestamp = timeMatcher.group(1);
         }
 
-        // Status keywords
         String lower = rawName.toLowerCase();
         if (lower.contains("read") || lower.contains("seen")) {
             status = "Read";
@@ -341,7 +471,6 @@ public class WhatsAppTool implements Tool {
             status = "Pending";
         }
 
-        // Check if message is from 'You'
         if (rawName.startsWith("You,") || rawName.startsWith("You:") || rawName.startsWith("you,") || rawName.startsWith("you:")) {
             sender = "You";
             if ("Received".equals(status)) status = "Sent";
@@ -377,7 +506,7 @@ public class WhatsAppTool implements Tool {
 
     private String formatMessages(List<WhatsAppMessage> messages) {
         if (messages.isEmpty()) {
-            return "(No messages found in active conversation)";
+            return "(No conversation messages found in active pane)";
         }
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < messages.size(); i++) {
@@ -396,26 +525,27 @@ public class WhatsAppTool implements Tool {
         return sb.toString().trim();
     }
 
-    private String buildChatExtractionScript() {
+    /**
+     * Extracts elements specifically from the left sidebar where unread chats reside.
+     */
+    private String buildSidebarUnreadExtractionScript() {
         return String.join("\n",
             "Add-Type -AssemblyName UIAutomationClient",
             "Add-Type -AssemblyName UIAutomationTypes",
             "Add-Type @'",
             "using System; using System.Runtime.InteropServices; using System.Text;",
-            "public class WAChat {",
-            "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);",
-            "  [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);",
-            "  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);",
+            "public class WAUnreadUIA {",
             "  [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);",
+            "  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);",
             "  [DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr h, StringBuilder t, int c);",
             "  [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h);",
             "}",
             "'@",
             "$waHwnd = [IntPtr]::Zero",
-            "[WAChat]::EnumWindows({param($h,$l)",
-            "  if (-not [WAChat]::IsWindowVisible($h)) { return $true }",
+            "[WAUnreadUIA]::EnumWindows({param($h,$l)",
+            "  if (-not [WAUnreadUIA]::IsWindowVisible($h)) { return $true }",
             "  $t = New-Object Text.StringBuilder 256",
-            "[WAChat]::GetWindowText($h, $t, 256) | Out-Null",
+            "[WAUnreadUIA]::GetWindowText($h, $t, 256) | Out-Null",
             "  if ($t.ToString() -like '*WhatsApp*') {",
             "    $script:waHwnd = $h",
             "    return $false",
@@ -429,7 +559,78 @@ public class WhatsAppTool implements Tool {
             "}",
             "",
             "$el = [System.Windows.Automation.AutomationElement]::FromHandle($waHwnd)",
+            "$winRect = $el.Current.BoundingRectangle",
+            "$splitX = $winRect.X + [math]::Min(420, $winRect.Width * 0.38)",
+            "",
             "$all = $el.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)",
+            "$items = New-Object System.Collections.ArrayList",
+            "",
+            "foreach ($item in $all) {",
+            "  $name = $item.Current.Name",
+            "  if (-not $name -or -not $name.Trim()) { continue }",
+            "  $trimmed = $name.Trim()",
+            "",
+            "  # Geometric filter: only inspect elements inside the left sidebar",
+            "  $rect = $item.Current.BoundingRectangle",
+            "  if ($rect.X -ge $splitX) { continue }",
+            "",
+            "  # Check for unread indicators in the name or automation ID",
+            "  if ($trimmed -match '(?i)\\b(\\d+)\\s*unread\\b' -or $trimmed -match '(?i)\\bunread\\s*message' -or ($item.Current.AutomationId -and $item.Current.AutomationId -like '*unread*')) {",
+            "    $items.Add([PSCustomObject]@{",
+            "      id = $item.Current.AutomationId",
+            "      name = $trimmed",
+            "    }) | Out-Null",
+            "  }",
+            "}",
+            "",
+            "if ($items.Count -gt 0) {",
+            "  $items | ConvertTo-Json -Compress",
+            "} else {",
+            "  Write-Output '[]'",
+            "}"
+        );
+    }
+
+    /**
+     * Extracts elements strictly from the right-hand conversation message pane.
+     * Excludes the left sidebar by geometric bounding coordinate check.
+     */
+    private String buildConversationPaneExtractionScript() {
+        return String.join("\n",
+            "Add-Type -AssemblyName UIAutomationClient",
+            "Add-Type -AssemblyName UIAutomationTypes",
+            "Add-Type @'",
+            "using System; using System.Runtime.InteropServices; using System.Text;",
+            "public class WAPaneUIA {",
+            "  [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);",
+            "  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);",
+            "  [DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr h, StringBuilder t, int c);",
+            "  [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h);",
+            "}",
+            "'@",
+            "$waHwnd = [IntPtr]::Zero",
+            "[WAPaneUIA]::EnumWindows({param($h,$l)",
+            "  if (-not [WAPaneUIA]::IsWindowVisible($h)) { return $true }",
+            "  $t = New-Object Text.StringBuilder 256",
+            "[WAPaneUIA]::GetWindowText($h, $t, 256) | Out-Null",
+            "  if ($t.ToString() -like '*WhatsApp*') {",
+            "    $script:waHwnd = $h",
+            "    return $false",
+            "  }",
+            "  return $true",
+            "}, [IntPtr]::Zero) | Out-Null",
+            "",
+            "if ($waHwnd -eq [IntPtr]::Zero) {",
+            "  Write-Output 'ERROR: WhatsApp window not found'",
+            "  exit 0",
+            "}",
+            "",
+            "$el = [System.Windows.Automation.AutomationElement]::FromHandle($waHwnd)",
+            "$winRect = $el.Current.BoundingRectangle",
+            "$splitX = $winRect.X + [math]::Min(420, $winRect.Width * 0.38)",
+            "",
+            "$all = $el.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)",
+            "$items = New-Object System.Collections.ArrayList",
             "",
             "$ignoreList = @(",
             "  'WhatsApp', 'System', 'Close', 'Minimize', 'Maximize', 'Restore',",
@@ -440,8 +641,6 @@ public class WhatsAppTool implements Tool {
             "  'Disappearing messages', 'Lock chat', 'Search with Google', 'Copy'",
             ")",
             "",
-            "$items = New-Object System.Collections.ArrayList",
-            "",
             "foreach ($item in $all) {",
             "  $ct = $item.Current.ControlType.ProgrammaticName",
             "  $aid = $item.Current.AutomationId",
@@ -451,6 +650,10 @@ public class WhatsAppTool implements Tool {
             "  $trimmed = $name.Trim()",
             "  if ($ignoreList -contains $trimmed) { continue }",
             "  if ($ct -in @('ControlType.TitleBar', 'ControlType.MenuBar', 'ControlType.Menu', 'ControlType.ScrollBar', 'ControlType.Thumb')) { continue }",
+            "",
+            "  # Geometric filter: strictly enforce conversation pane (right of split)",
+            "  $rect = $item.Current.BoundingRectangle",
+            "  if ($rect.X -lt $splitX) { continue }",
             "",
             "  $isTime = $trimmed -match '\\b\\d{1,2}:\\d{2}\\b'",
             "  $isYou = $trimmed -match '^(You|you)[,:]'",

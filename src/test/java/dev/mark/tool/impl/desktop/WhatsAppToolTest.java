@@ -74,6 +74,8 @@ class WhatsAppToolTest {
         assertEquals("Alice", result.metadata().get("contact"));
 
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("CTRL+F");
+        verify(desktopAutomation, atLeastOnce()).pressKeyCombination("CTRL+A");
+        verify(desktopAutomation, atLeastOnce()).pressKeyCombination("BACKSPACE");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("CTRL+V");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("ENTER");
     }
@@ -145,5 +147,56 @@ class WhatsAppToolTest {
         assertEquals("sounds good!", incoming.text());
         assertEquals("3:25 PM", incoming.timestamp());
         assertEquals("Received", incoming.status());
+    }
+
+    @Test
+    void testVerifyMessageAction() throws Exception {
+        when(desktopAutomation.ensureFocus(anyString())).thenReturn(ToolResultDTO.success("Focus verified"));
+
+        String mockJson = "[{\"id\":\"msg_1\",\"name\":\"Alice, Are we meeting today?, 3:20 PM\"},{\"id\":\"msg_2\",\"name\":\"You, hi, 3:24 PM, Sent\"}]";
+        when(desktopAutomation.runPowershell(anyString())).thenReturn(mockJson);
+
+        ToolRequestDTO requestPass = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_automation", Map.of(
+            "action", "verify_message",
+            "contact", "Alice",
+            "expected_message", "hi"
+        ));
+        ToolResultDTO resPass = whatsAppTool.execute(requestPass);
+        assertTrue(resPass.successful());
+        assertTrue(resPass.observation().contains("VERIFICATION PASSED"));
+        assertEquals(Boolean.TRUE, resPass.metadata().get("verified"));
+
+        ToolRequestDTO requestFail = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_automation", Map.of(
+            "action", "verify_message",
+            "contact", "Alice",
+            "expected_message", "nonexistent message"
+        ));
+        ToolResultDTO resFail = whatsAppTool.execute(requestFail);
+        assertFalse(resFail.successful());
+        assertTrue(resFail.observation().contains("VERIFICATION FAILED"));
+        assertEquals(Boolean.FALSE, resFail.metadata().get("verified"));
+    }
+
+    @Test
+    void testListUnreadChats() throws Exception {
+        when(desktopAutomation.ensureFocus(anyString())).thenReturn(ToolResultDTO.success("Focus verified"));
+
+        // Case 1: No unreads
+        when(desktopAutomation.runPowershell(anyString())).thenReturn("[]");
+        ToolRequestDTO emptyRequest = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_automation", Map.of(
+            "action", "list_unread_chats"
+        ));
+        ToolResultDTO emptyRes = whatsAppTool.execute(emptyRequest);
+        assertTrue(emptyRes.successful());
+        assertTrue(emptyRes.observation().contains("No unread messages found"));
+        assertEquals(0, emptyRes.metadata().get("unread_chats_count"));
+
+        // Case 2: Unreads present
+        String mockUnreadsJson = "[{\"id\":\"item_1\",\"name\":\"Alice, Hello, 10:15 AM, 2 unread messages\"}]";
+        when(desktopAutomation.runPowershell(anyString())).thenReturn(mockUnreadsJson);
+        ToolResultDTO unreadRes = whatsAppTool.execute(emptyRequest);
+        assertTrue(unreadRes.successful());
+        assertTrue(unreadRes.observation().contains("Found 1 chat(s) with unread messages"));
+        assertEquals(1, unreadRes.metadata().get("unread_chats_count"));
     }
 }
