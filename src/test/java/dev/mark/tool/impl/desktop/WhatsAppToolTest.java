@@ -175,6 +175,19 @@ class WhatsAppToolTest {
         assertFalse(resFail.successful());
         assertTrue(resFail.observation().contains("VERIFICATION FAILED"));
         assertEquals(Boolean.FALSE, resFail.metadata().get("verified"));
+
+        // Case 3: Plain text bubble like "hi" (WinUI Text/Custom control)
+        String plainBubbleJson = "[{\"id\":\"msg_3\",\"name\":\"hi\"}]";
+        when(desktopAutomation.runPowershell(anyString())).thenReturn(plainBubbleJson);
+        ToolRequestDTO requestPlain = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_automation", Map.of(
+            "action", "verify_message",
+            "contact", "8280901077",
+            "expected_message", "hi"
+        ));
+        ToolResultDTO resPlain = whatsAppTool.execute(requestPlain);
+        assertTrue(resPlain.successful());
+        assertTrue(resPlain.observation().contains("VERIFICATION PASSED"));
+        assertEquals(Boolean.TRUE, resPlain.metadata().get("verified"));
     }
 
     @Test
