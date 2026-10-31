@@ -264,7 +264,8 @@ public class DesktopAutomationTool implements Tool {
             "  $t=New-Object Text.StringBuilder 256",
             "  [WA]::GetWindowText($h,$t,256)|Out-Null",
             "  if($t.ToString() -like '*" + safe + "*'){",
-            "    [WA]::ShowWindow($h,9)|Out-Null",   // 9 = SW_RESTORE
+            "    $cmd = if('" + safe + "' -like '*WhatsApp*'){ 3 } else { 9 }",
+            "    [WA]::ShowWindow($h,$cmd)|Out-Null",
             "    [WA]::SetForegroundWindow($h)|Out-Null",
             "    $script:found=$true",
             "    Write-Output \"Activated: $($t.ToString())\"",

@@ -73,10 +73,12 @@ class WhatsAppToolTest {
         assertEquals("SENT", result.metadata().get("status"));
         assertEquals("Alice", result.metadata().get("contact"));
 
+        verify(desktopAutomation, atLeastOnce()).pressKeyCombination("WIN+UP");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("CTRL+F");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("CTRL+A");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("BACKSPACE");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("CTRL+V");
+        verify(desktopAutomation, atLeastOnce()).pressKeyCombination("DOWN");
         verify(desktopAutomation, atLeastOnce()).pressKeyCombination("ENTER");
     }
 

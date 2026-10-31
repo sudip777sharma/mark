@@ -162,6 +162,9 @@ public class WhatsAppTool implements Tool {
                 throw new IllegalStateException("Failed to bring WhatsApp Desktop to foreground. Ensure WhatsApp is installed.");
             }
         }
+        // Guarantee maximized two-pane desktop layout
+        desktopAutomation.pressKeyCombination("WIN+UP");
+        Thread.sleep(150);
     }
 
     /**
@@ -170,22 +173,26 @@ public class WhatsAppTool implements Tool {
     private void searchAndSelectContact(String contact) throws InterruptedException {
         // 1. Focus search bar via native shortcut Ctrl+F
         desktopAutomation.pressKeyCombination("CTRL+F");
-        Thread.sleep(150);
+        Thread.sleep(200);
 
         // 2. Clear any residual text from previous searches (Ctrl+A -> Backspace)
         desktopAutomation.pressKeyCombination("CTRL+A");
-        Thread.sleep(80);
+        Thread.sleep(100);
         desktopAutomation.pressKeyCombination("BACKSPACE");
-        Thread.sleep(80);
+        Thread.sleep(100);
 
         // 3. Paste clean contact query
         DesktopAutomationTool.setClipboardText(contact);
         desktopAutomation.pressKeyCombination("CTRL+V");
-        Thread.sleep(450);
+        Thread.sleep(500);
 
-        // 4. Confirm selection with Enter and wait for conversation pane to settle
+        // 4. Move selection from search box down to first search result
+        desktopAutomation.pressKeyCombination("DOWN");
+        Thread.sleep(150);
+
+        // 5. Confirm selection with Enter and wait for conversation pane to settle
         desktopAutomation.pressKeyCombination("ENTER");
-        Thread.sleep(750);
+        Thread.sleep(800);
     }
 
     /**
