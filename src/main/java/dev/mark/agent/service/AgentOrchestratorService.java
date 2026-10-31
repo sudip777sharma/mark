@@ -346,6 +346,17 @@ public class AgentOrchestratorService {
                     state.addStep(new AgentStepModel(stepNumber, response.content(), toolCall.name(), argsJson,
                             outcome + ": " + details, response.provider(), java.time.Instant.now()));
 
+                    if ("task_complete".equals(toolCall.name()) && toolResult.successful()) {
+                        log.info("=== [ORCHESTRATOR:TASK_COMPLETE] taskId={} marked complete via task_complete tool", state.taskId());
+                        state.setStatus("COMPLETED");
+                        state.setFinalAnswer(details);
+                        for (LlmToolObservationDTO obs : observations) {
+                            state.addMessage(LlmMessageDTO.toolObservation(obs));
+                        }
+                        saveState(state);
+                        return;
+                    }
+
                     if (!toolResult.successful()
                             || Boolean.TRUE.equals(toolResult.metadata().get("transition_detected"))) {
                         log.info(
