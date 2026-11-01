@@ -37,6 +37,8 @@ public class WhatsAppWebTool implements Tool {
 
     public record WhatsAppWebMessage(boolean fromMe, String sender, String text, String timestamp, String status, String raw) {}
     public record WhatsAppWebUnreadChat(String contact, int unreadCount, String lastSnippet, String timestamp, String raw) {}
+    public record WhatsAppWebStatusItem(String contact, String timestamp, boolean unseen, String raw) {}
+    public record WhatsAppWebMyStatus(boolean hasActiveStatus, String timestamp, int viewCount, List<String> viewers) {}
 
     public WhatsAppWebTool(BrowserSession browserSession, ObjectMapper objectMapper) {
         this.browserSession = browserSession;
@@ -51,7 +53,8 @@ public class WhatsAppWebTool implements Tool {
     @Override
     public String description() {
         return "Automates WhatsApp Web in the background using Playwright. "
-                + "Actions: 'open_session', 'send_message', 'open_chat', 'read_chat', 'verify_message', 'list_unread_chats'. "
+                + "Actions: 'open_session', 'send_message', 'open_chat', 'read_chat', 'verify_message', 'list_unread_chats', "
+                + "'list_unseen_statuses', 'get_my_status', 'post_status', 'view_contact_status', 'start_audio_call', 'start_video_call'. "
                 + "Arguments: action (required), contact (phone number with country code or contact name), message, expected_message, limit.";
     }
 
@@ -63,7 +66,10 @@ public class WhatsAppWebTool implements Tool {
             "properties", Map.of(
                 "action", Map.of(
                     "type", "string",
-                    "enum", List.of("open_session", "send_message", "open_chat", "read_chat", "verify_message", "list_unread_chats"),
+                    "enum", List.of(
+                        "open_session", "send_message", "open_chat", "read_chat", "verify_message", "list_unread_chats",
+                        "list_unseen_statuses", "get_my_status", "post_status", "view_contact_status", "start_audio_call", "start_video_call"
+                    ),
                     "description", "WhatsApp Web action to perform"
                 ),
                 "contact", Map.of(
@@ -72,7 +78,7 @@ public class WhatsAppWebTool implements Tool {
                 ),
                 "message", Map.of(
                     "type", "string",
-                    "description", "Message text content to send"
+                    "description", "Message text content to send in chat, or text status to publish"
                 ),
                 "expected_message", Map.of(
                     "type", "string",
@@ -80,7 +86,7 @@ public class WhatsAppWebTool implements Tool {
                 ),
                 "limit", Map.of(
                     "type", "integer",
-                    "description", "Maximum number of recent messages to read (default: 10)"
+                    "description", "Maximum number of recent messages/statuses to read (default: 10)"
                 )
             )
         );
@@ -139,6 +145,25 @@ public class WhatsAppWebTool implements Tool {
 
                 case "list_unread_chats":
                     return executeListUnreadChats(page, limit);
+
+                case "list_unseen_statuses":
+                    return executeListUnseenStatuses(page, limit);
+
+                case "get_my_status":
+                    return executeGetMyStatus(page);
+
+                case "post_status":
+                    String statusText = (String) arguments.get("message");
+                    return executePostStatus(page, statusText);
+
+                case "view_contact_status":
+                    return executeViewContactStatus(page, contact);
+
+                case "start_audio_call":
+                    return executeStartCall(page, contact, false);
+
+                case "start_video_call":
+                    return executeStartCall(page, contact, true);
 
                 default:
                     return new ToolResultDTO(false, "Unsupported WhatsApp Web action: " + action, Map.of());
@@ -573,5 +598,328 @@ public class WhatsAppWebTool implements Tool {
             sb.append("\n");
         }
         return sb.toString().trim();
+    }
+
+    private boolean ensureStatusPanel(Page page) {
+        try {
+            var statusHeading = page.locator("header:has-text('Status'), div:has-text('Recent updates'), div:has-text('My status')").first();
+            if (statusHeading.count() > 0 && statusHeading.isVisible()) {
+                return true;
+            }
+            var statusBtn = page.locator("button[aria-label='Status'], button:has(span[data-icon='status-v3']), button:has(span[data-icon='status-refreshed']), button:has(span[data-icon='status-outline'])").first();
+            if (statusBtn.count() > 0) {
+                statusBtn.click();
+                page.waitForTimeout(800);
+                return true;
+            }
+        } catch (Exception e) {
+            log.warn("Notice switching to Status panel: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    private void ensureChatsPanel(Page page) {
+        try {
+            var chatsBtn = page.locator("button[aria-label='Chats'], button:has(span[data-icon='chats-outline']), button:has(span[data-icon='chat'])").first();
+            if (chatsBtn.count() > 0) {
+                chatsBtn.click();
+                page.waitForTimeout(600);
+            }
+        } catch (Exception e) {
+            log.debug("Notice switching back to chats: {}", e.getMessage());
+        }
+    }
+
+    private ToolResultDTO executeListUnseenStatuses(Page page, int limit) {
+        log.info("Executing WhatsApp Web list_unseen_statuses (limit={})", limit);
+        ensureStatusPanel(page);
+
+        String jsExtractStatuses = """
+            () => {
+                const results = [];
+                let badgeCount = 0;
+                const statusBtn = document.querySelector('button[aria-label*="Status"], button:has(span[data-icon*="status"])');
+                if (statusBtn) {
+                    const badge = statusBtn.querySelector('span[aria-label*="unread"], span.x178xt8z');
+                    if (badge) {
+                        const aria = badge.getAttribute('aria-label') || '';
+                        const m = aria.match(/(\\d+)/);
+                        badgeCount = m ? parseInt(m[1]) : 1;
+                    }
+                }
+
+                const rows = document.querySelectorAll('div[data-testid="status-item"], div[role="button"]:has(span[title]), div#pane-side div[role="button"]');
+                let isRecentSection = true;
+
+                for (const row of rows) {
+                    const titleEl = row.querySelector('span[title]');
+                    const name = titleEl ? titleEl.getAttribute('title') : '';
+                    if (!name || name.toLowerCase() === 'my status' || name.toLowerCase().includes('status')) {
+                        continue;
+                    }
+
+                    const svgRing = row.querySelector('svg');
+                    let unseen = false;
+                    if (svgRing) {
+                        const stroke = svgRing.getAttribute('stroke') || '';
+                        const style = svgRing.getAttribute('style') || '';
+                        const html = svgRing.outerHTML || '';
+                        if (html.includes('00a884') || html.includes('status-v3-unread') || html.includes('var(--status-ring-unread)') || stroke.includes('green') || style.includes('green')) {
+                            unseen = true;
+                        }
+                    }
+
+                    if (!unseen && isRecentSection) {
+                        const text = row.innerText || '';
+                        if (text.includes('Viewed')) {
+                            isRecentSection = false;
+                        } else {
+                            unseen = true;
+                        }
+                    }
+
+                    const timeEl = row.querySelector('div:has-text("Today"), div:has-text("Yesterday"), div:has-text("ago"), span.x1f6kntn, div.x1f6kntn');
+                    const time = timeEl ? timeEl.innerText.trim() : '';
+
+                    if (!results.some(r => r.contact.toLowerCase() === name.toLowerCase())) {
+                        results.push({ contact: name, timestamp: time, unseen: unseen });
+                    }
+                }
+
+                return JSON.stringify({ badgeCount: badgeCount, items: results });
+            }
+            """;
+
+        String jsonResult = (String) page.evaluate(jsExtractStatuses);
+        List<WhatsAppWebStatusItem> allStatuses = parseStatusesJson(jsonResult, limit);
+        List<WhatsAppWebStatusItem> unseenStatuses = allStatuses.stream().filter(WhatsAppWebStatusItem::unseen).toList();
+
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("action", "list_unseen_statuses");
+        metadata.put("unseen_count", unseenStatuses.size());
+        metadata.put("total_status_updates", allStatuses.size());
+        metadata.put("unseen_statuses", unseenStatuses);
+
+        ensureChatsPanel(page);
+
+        if (unseenStatuses.isEmpty()) {
+            return new ToolResultDTO(true, "No unseen WhatsApp statuses found. All status updates have been viewed or none are available.", metadata);
+        }
+
+        StringBuilder sb = new StringBuilder();
+        sb.append(String.format("Found %d unseen contact status update(s) in WhatsApp Web:\n", unseenStatuses.size()));
+        for (int i = 0; i < unseenStatuses.size(); i++) {
+            WhatsAppWebStatusItem s = unseenStatuses.get(i);
+            sb.append(String.format("%d. %s (%s)\n", i + 1, s.contact(), s.timestamp().isBlank() ? "Recent" : s.timestamp()));
+        }
+
+        return new ToolResultDTO(true, sb.toString().trim(), metadata);
+    }
+
+    private ToolResultDTO executeGetMyStatus(Page page) {
+        log.info("Executing WhatsApp Web get_my_status");
+        ensureStatusPanel(page);
+
+        String jsMyStatus = """
+            () => {
+                const myStatusRow = document.querySelector('div[role="button"]:has-text("My status"), div:has-text("My status")');
+                if (!myStatusRow) {
+                    return JSON.stringify({ hasActiveStatus: false, text: "My status section not found", viewCount: 0 });
+                }
+
+                const text = myStatusRow.innerText || '';
+                if (text.includes("Tap to add status update") || text.includes("No updates") || text.includes("Add to my status")) {
+                    return JSON.stringify({ hasActiveStatus: false, text: "No active status update posted.", viewCount: 0 });
+                }
+
+                let viewCount = 0;
+                const viewMatch = text.match(/(\\d+)\\s*(views|viewed by|view)/i) || text.match(/viewed by\\s*(\\d+)/i);
+                if (viewMatch) {
+                    viewCount = parseInt(viewMatch[1]);
+                } else {
+                    const icon = myStatusRow.querySelector('span[data-icon="view-status"], svg:has(path[d*="eye"])');
+                    if (icon && icon.parentElement) {
+                        const m = icon.parentElement.innerText.match(/(\\d+)/);
+                        if (m) viewCount = parseInt(m[1]);
+                    }
+                }
+
+                const timeMatch = text.match(/(Today[^\n]*|Yesterday[^\n]*|\\d+:\\d+\\s*(am|pm)|Just now|[^\n]*ago)/i);
+                const time = timeMatch ? timeMatch[0].trim() : "Active";
+
+                return JSON.stringify({ hasActiveStatus: true, timestamp: time, viewCount: viewCount, raw: text });
+            }
+            """;
+
+        String jsonResult = (String) page.evaluate(jsMyStatus);
+        ensureChatsPanel(page);
+
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("action", "get_my_status");
+
+        try {
+            JsonNode root = objectMapper.readTree(jsonResult);
+            boolean hasActiveStatus = root.has("hasActiveStatus") && root.get("hasActiveStatus").asBoolean();
+            int viewCount = root.has("viewCount") ? root.get("viewCount").asInt(0) : 0;
+            String timestamp = root.has("timestamp") ? root.get("timestamp").asText("") : "";
+
+            metadata.put("has_active_status", hasActiveStatus);
+            metadata.put("view_count", viewCount);
+            metadata.put("timestamp", timestamp);
+
+            if (!hasActiveStatus) {
+                return new ToolResultDTO(true, "You currently have NO active status posted on WhatsApp Web.", metadata);
+            } else {
+                String summary = String.format("You have an ACTIVE WhatsApp status posted (%s). Viewed by %d people.",
+                    timestamp.isBlank() ? "Recently" : timestamp, viewCount);
+                return new ToolResultDTO(true, summary, metadata);
+            }
+        } catch (Exception e) {
+            return new ToolResultDTO(false, "Failed to inspect My Status: " + e.getMessage(), metadata);
+        }
+    }
+
+    private ToolResultDTO executePostStatus(Page page, String text) {
+        log.info("Executing WhatsApp Web post_status: \"{}\"", text);
+        if (text == null || text.isBlank()) {
+            return new ToolResultDTO(false, "Argument 'message' is required for 'post_status'.", Map.of());
+        }
+
+        ensureStatusPanel(page);
+
+        try {
+            var pencilBtn = page.locator("button[aria-label*='Text' i], button[aria-label*='Add status' i], button:has(span[data-icon='status-pencil']), button:has(span[data-icon='pencil'])").first();
+            if (pencilBtn.count() == 0) {
+                pencilBtn = page.locator("div[role='button']:has-text('My status') button, span[data-icon='status-pencil']").first();
+            }
+
+            if (pencilBtn.count() > 0) {
+                pencilBtn.click();
+                page.waitForTimeout(1000);
+            } else {
+                ensureChatsPanel(page);
+                return new ToolResultDTO(false, "Could not find WhatsApp Web Status creation button.", Map.of("action", "post_status"));
+            }
+
+            page.waitForSelector("div[contenteditable='true'], div[role='textbox']",
+                new Page.WaitForSelectorOptions().setTimeout(10000));
+            var composer = page.locator("div[contenteditable='true'], div[role='textbox']").first();
+            composer.click();
+            composer.fill(text);
+            page.waitForTimeout(600);
+
+            var sendBtn = page.locator("button[aria-label='Send'], button:has(span[data-icon='send']), span[data-icon='send']").first();
+            if (sendBtn.count() > 0) {
+                sendBtn.click();
+            } else {
+                page.keyboard().press("Enter");
+            }
+            page.waitForTimeout(1500);
+
+            ensureChatsPanel(page);
+            return new ToolResultDTO(true, "Successfully posted new WhatsApp status update: \"" + text + "\"",
+                Map.of("action", "post_status", "status", "POSTED", "message", text));
+        } catch (Exception e) {
+            ensureChatsPanel(page);
+            return new ToolResultDTO(false, "Failed to post status: " + e.getMessage(), Map.of("action", "post_status"));
+        }
+    }
+
+    private ToolResultDTO executeViewContactStatus(Page page, String contact) {
+        log.info("Executing WhatsApp Web view_contact_status for '{}'", contact);
+        if (contact == null || contact.isBlank()) {
+            return new ToolResultDTO(false, "Argument 'contact' is required for 'view_contact_status'.", Map.of());
+        }
+
+        ensureStatusPanel(page);
+
+        try {
+            String selector = String.format(
+                "div[data-testid='status-item']:has-text('%s'), div[role='button']:has(span[title*='%s']), div:has(span[title*='%s'])",
+                contact, contact, contact
+            );
+            var item = page.locator(selector).first();
+            if (item.count() == 0) {
+                ensureChatsPanel(page);
+                return new ToolResultDTO(false, "No status found for contact '" + contact + "'.", Map.of("contact", contact, "action", "view_contact_status"));
+            }
+
+            item.click();
+            page.waitForTimeout(4000);
+
+            var closeBtn = page.locator("button[aria-label='Close'], button:has(span[data-icon='x-viewer']), span[data-icon='x-viewer']").first();
+            if (closeBtn.count() > 0) {
+                closeBtn.click();
+            } else {
+                page.keyboard().press("Escape");
+            }
+            page.waitForTimeout(800);
+
+            ensureChatsPanel(page);
+            return new ToolResultDTO(true, "Successfully opened and viewed WhatsApp status for contact '" + contact + "'.",
+                Map.of("contact", contact, "status", "VIEWED", "action", "view_contact_status"));
+        } catch (Exception e) {
+            ensureChatsPanel(page);
+            return new ToolResultDTO(false, "Failed to view status for '" + contact + "': " + e.getMessage(),
+                Map.of("contact", contact, "action", "view_contact_status"));
+        }
+    }
+
+    private ToolResultDTO executeStartCall(Page page, String contact, boolean isVideo) {
+        String callType = isVideo ? "video call" : "voice call";
+        log.info("Executing WhatsApp Web start_{} for '{}'", isVideo ? "video_call" : "audio_call", contact);
+
+        if (contact == null || contact.isBlank()) {
+            return new ToolResultDTO(false, "Argument 'contact' is required to start a " + callType + ".", Map.of());
+        }
+
+        executeOpenChat(page, contact);
+
+        try {
+            page.waitForSelector("#main header", new Page.WaitForSelectorOptions().setTimeout(10000));
+            String selector = isVideo
+                ? "#main header button[aria-label*='video' i], #main header button:has(span[data-icon='video-call']), #main header span[data-icon='video-call']"
+                : "#main header button[aria-label*='voice' i], #main header button[aria-label*='audio' i], #main header button:has(span[data-icon='audio-call']), #main header span[data-icon='audio-call']";
+
+            var callBtn = page.locator(selector).first();
+            if (callBtn.count() == 0) {
+                return new ToolResultDTO(false, "Call button (" + callType + ") is not available or supported for '" + contact + "' in WhatsApp Web.",
+                    Map.of("contact", contact, "action", isVideo ? "start_video_call" : "start_audio_call"));
+            }
+
+            callBtn.click();
+            page.waitForTimeout(1500);
+
+            return new ToolResultDTO(true, "Successfully initiated WhatsApp " + callType + " to '" + contact + "'.",
+                Map.of("contact", contact, "call_type", isVideo ? "VIDEO" : "AUDIO", "status", "RINGING", "action", isVideo ? "start_video_call" : "start_audio_call"));
+        } catch (Exception e) {
+            return new ToolResultDTO(false, "Failed to start " + callType + " to '" + contact + "': " + e.getMessage(),
+                Map.of("contact", contact, "action", isVideo ? "start_video_call" : "start_audio_call"));
+        }
+    }
+
+    private List<WhatsAppWebStatusItem> parseStatusesJson(String rawJson, int limit) {
+        if (rawJson == null || rawJson.isBlank() || rawJson.equals("{}")) {
+            return List.of();
+        }
+        List<WhatsAppWebStatusItem> list = new ArrayList<>();
+        try {
+            JsonNode root = objectMapper.readTree(rawJson);
+            JsonNode itemsNode = root.has("items") ? root.get("items") : root;
+            if (itemsNode.isArray()) {
+                for (JsonNode n : itemsNode) {
+                    String contact = n.has("contact") ? n.get("contact").asText("") : "";
+                    String timestamp = n.has("timestamp") ? n.get("timestamp").asText("") : "";
+                    boolean unseen = n.has("unseen") && n.get("unseen").asBoolean();
+                    if (!contact.isBlank()) {
+                        list.add(new WhatsAppWebStatusItem(contact, timestamp, unseen, n.toString()));
+                        if (list.size() >= limit) break;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse statuses JSON: {}", e.getMessage());
+        }
+        return list;
     }
 }

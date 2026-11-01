@@ -48,6 +48,7 @@ class WhatsAppWebToolTest {
         when(page.locator(anyString())).thenReturn(locator);
         when(page.keyboard()).thenReturn(keyboard);
         when(locator.first()).thenReturn(locator);
+        when(locator.count()).thenReturn(1);
     }
 
     @Test
@@ -103,6 +104,8 @@ class WhatsAppWebToolTest {
 
     @Test
     void testOpenChatPhoneNumber() {
+        when(locator.count()).thenReturn(0).thenReturn(1); // not in sidebar, falls back to direct URL
+
         ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
             "action", "open_chat",
             "contact", "8280901077"
@@ -225,5 +228,124 @@ class WhatsAppWebToolTest {
         assertEquals(1, result.metadata().get("unread_chats_count"));
         assertTrue(result.observation().contains("Found 1 chat(s) with unread messages"));
         assertTrue(result.observation().contains("Alice (3 unread messages)"));
+    }
+
+    @Test
+    void testListUnseenStatuses() {
+        String mockStatusesJson = """
+            {
+                "badgeCount": 2,
+                "items": [
+                    { "contact": "Suryansh Infosys", "timestamp": "Today at 3:15 pm", "unseen": true },
+                    { "contact": "Alice", "timestamp": "Yesterday", "unseen": false }
+                ]
+            }
+            """;
+        when(page.evaluate(anyString())).thenReturn(mockStatusesJson);
+
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "list_unseen_statuses"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertTrue(result.successful());
+        assertEquals(1, result.metadata().get("unseen_count"));
+        assertTrue(result.observation().contains("Suryansh Infosys"));
+    }
+
+    @Test
+    void testGetMyStatusActive() {
+        String mockMyStatusJson = """
+            {
+                "hasActiveStatus": true,
+                "timestamp": "Today, 4:10 pm",
+                "viewCount": 14
+            }
+            """;
+        when(page.evaluate(anyString())).thenReturn(mockMyStatusJson);
+
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "get_my_status"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertTrue(result.successful());
+        assertEquals(Boolean.TRUE, result.metadata().get("has_active_status"));
+        assertEquals(14, result.metadata().get("view_count"));
+        assertTrue(result.observation().contains("Viewed by 14 people"));
+    }
+
+    @Test
+    void testGetMyStatusNone() {
+        String mockMyStatusJson = """
+            {
+                "hasActiveStatus": false,
+                "viewCount": 0
+            }
+            """;
+        when(page.evaluate(anyString())).thenReturn(mockMyStatusJson);
+
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "get_my_status"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertTrue(result.successful());
+        assertEquals(Boolean.FALSE, result.metadata().get("has_active_status"));
+        assertTrue(result.observation().contains("NO active status posted"));
+    }
+
+    @Test
+    void testPostStatus() {
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "post_status",
+            "message", "Hello world from MARK!"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertTrue(result.successful());
+        assertEquals("POSTED", result.metadata().get("status"));
+        assertTrue(result.observation().contains("Successfully posted new WhatsApp status"));
+    }
+
+    @Test
+    void testViewContactStatus() {
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "view_contact_status",
+            "contact", "Suryansh Infosys"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertTrue(result.successful());
+        assertEquals("VIEWED", result.metadata().get("status"));
+        assertTrue(result.observation().contains("Successfully opened and viewed WhatsApp status"));
+    }
+
+    @Test
+    void testStartAudioCall() {
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "start_audio_call",
+            "contact", "8280901077"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertTrue(result.successful());
+        assertEquals("AUDIO", result.metadata().get("call_type"));
+        assertEquals("RINGING", result.metadata().get("status"));
+        assertTrue(result.observation().contains("voice call"));
+    }
+
+    @Test
+    void testStartVideoCall() {
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "start_video_call",
+            "contact", "8280901077"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertTrue(result.successful());
+        assertEquals("VIDEO", result.metadata().get("call_type"));
+        assertEquals("RINGING", result.metadata().get("status"));
+        assertTrue(result.observation().contains("video call"));
     }
 }
