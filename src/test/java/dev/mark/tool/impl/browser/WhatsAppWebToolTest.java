@@ -97,7 +97,7 @@ class WhatsAppWebToolTest {
         assertTrue(result.successful());
         assertEquals("SENT", result.metadata().get("status"));
         assertEquals("8280901077", result.metadata().get("contact"));
-        verify(page).navigate(contains("send?phone=8280901077"));
+        verify(page).navigate(contains("send?phone=918280901077"));
         verify(locator).click();
     }
 
@@ -111,7 +111,7 @@ class WhatsAppWebToolTest {
         ToolResultDTO result = whatsAppWebTool.execute(request);
         assertTrue(result.successful());
         assertEquals("OPENED", result.metadata().get("status"));
-        verify(page).navigate(contains("send?phone=8280901077"));
+        verify(page).navigate(contains("send?phone=918280901077"));
     }
 
     @Test

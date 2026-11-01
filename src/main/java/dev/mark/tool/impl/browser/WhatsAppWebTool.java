@@ -187,9 +187,35 @@ public class WhatsAppWebTool implements Tool {
     private ToolResultDTO executeOpenChat(Page page, String contact) {
         log.info("Executing WhatsApp Web open_chat for '{}'", contact);
         String digits = contact.replaceAll("[^0-9]", "");
+        String clean = contact.trim();
+        String last10 = digits.length() >= 10 ? digits.substring(digits.length() - 10) : digits;
 
+        // 1. First check if contact/number is already directly visible in the sidebar list
+        try {
+            page.waitForSelector("#pane-side", new Page.WaitForSelectorOptions().setTimeout(6000));
+            // Formatted phone match: e.g. "82809 01077" or "8280901077"
+            String formatted5_5 = last10.length() == 10 ? (last10.substring(0, 5) + " " + last10.substring(5)) : last10;
+            String selector = String.format(
+                "#pane-side span[title*='%s'], #pane-side span[title*='%s'], #pane-side span[title*='%s']",
+                clean, last10, formatted5_5
+            );
+            var item = page.locator(selector).first();
+            if (item.count() > 0) {
+                log.info("Contact '{}' found directly in sidebar list, clicking to open...", contact);
+                item.click();
+                page.waitForTimeout(600);
+                return new ToolResultDTO(true, "Successfully opened WhatsApp Web chat with '" + contact + "'.",
+                        Map.of("contact", contact, "status", "OPENED", "action", "open_chat"));
+            }
+        } catch (Exception e) {
+            log.debug("Sidebar scan check notice: {}", e.getMessage());
+        }
+
+        // 2. Direct URL navigation for phone numbers
         if (digits.length() >= 7 && contact.matches("^[\\+]?[0-9\\s\\-\\(\\)]{7,}$")) {
-            String url = "https://web.whatsapp.com/send?phone=" + digits;
+            // If 10 digits without country code, default to 91 (India)
+            String fullDigits = (digits.length() == 10 && !digits.startsWith("91")) ? ("91" + digits) : digits;
+            String url = "https://web.whatsapp.com/send?phone=" + fullDigits;
             log.info("Opening chat via direct URL: {}", url);
             page.navigate(url);
             try {
@@ -199,14 +225,14 @@ public class WhatsAppWebTool implements Tool {
                 log.warn("Timed out waiting for chat pane to settle: {}", e.getMessage());
             }
         } else {
-            // Search contact in sidebar
+            // 3. Search contact in sidebar
             try {
                 page.waitForSelector("#pane-side", new Page.WaitForSelectorOptions().setTimeout(10000));
                 var searchInput = page.locator("div[contenteditable='true'][data-tab='3']").first();
                 if (searchInput.count() > 0) {
                     searchInput.click();
                     searchInput.fill(contact);
-                    page.waitForTimeout(500);
+                    page.waitForTimeout(600);
                     page.keyboard().press("Enter");
                     page.waitForTimeout(600);
                 }
@@ -224,8 +250,9 @@ public class WhatsAppWebTool implements Tool {
         String digits = contact.replaceAll("[^0-9]", "");
 
         if (digits.length() >= 7 && contact.matches("^[\\+]?[0-9\\s\\-\\(\\)]{7,}$")) {
+            String fullDigits = (digits.length() == 10 && !digits.startsWith("91")) ? ("91" + digits) : digits;
             String encodedMsg = URLEncoder.encode(message, StandardCharsets.UTF_8);
-            String url = "https://web.whatsapp.com/send?phone=" + digits + "&text=" + encodedMsg;
+            String url = "https://web.whatsapp.com/send?phone=" + fullDigits + "&text=" + encodedMsg;
             page.navigate(url);
         } else {
             executeOpenChat(page, contact);
@@ -287,6 +314,23 @@ public class WhatsAppWebTool implements Tool {
                         else if (row.querySelector('span[data-icon="msg-time"]')) status = 'Pending';
                     }
                     list.push({ pre, text, fromMe, status });
+                }
+                if (list.length === 0) {
+                    const rows = document.querySelectorAll('#main div.message-out, #main div.message-in');
+                    for (const row of rows) {
+                        const textEl = row.querySelector('span.selectable-text');
+                        if (textEl && textEl.innerText) {
+                            const fromMe = row.classList.contains('message-out');
+                            let status = fromMe ? 'Sent' : 'Received';
+                            if (fromMe) {
+                                if (row.querySelector('span[data-icon="msg-dblcheck-ack"]')) status = 'Read';
+                                else if (row.querySelector('span[data-icon="msg-dblcheck"]')) status = 'Delivered';
+                                else if (row.querySelector('span[data-icon="msg-check"]')) status = 'Sent';
+                                else if (row.querySelector('span[data-icon="msg-time"]')) status = 'Pending';
+                            }
+                            list.push({ pre: '', text: textEl.innerText, fromMe, status });
+                        }
+                    }
                 }
                 return JSON.stringify(list);
             }
