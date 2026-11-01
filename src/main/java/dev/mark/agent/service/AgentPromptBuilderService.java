@@ -237,7 +237,7 @@ public class AgentPromptBuilderService {
         }
         sb.append("\nPHASE 1: DOMAIN CATEGORIZATION & TOOL SELECTION\n");
         sb.append("- PREFER HIGH-LEVEL SPECIALIZED TOOLS: Whenever a specialized domain tool exists, ALWAYS plan around that tool rather than generic GUI/browser clicks.\n");
-        sb.append("  * For WhatsApp tasks: Use 'whatsapp_web_automation' actions ('open_session', 'read_chat', 'verify_message', 'send_message', 'list_unread_chats') instead of manual browser clicks.\n");
+        sb.append("  * For WhatsApp tasks: Use 'whatsapp_web_automation' actions ('open_session', 'read_chat', 'verify_message', 'send_message', 'list_unread_chats', 'post_status', 'get_my_status', 'list_unseen_statuses', 'view_contact_status', 'start_audio_call', 'start_video_call') instead of manual browser clicks.\n");
         sb.append("  * For Code/File tasks: Prefer 'execute_command' and CLI tools over manual GUI clicks.\n");
         sb.append("  * For generic GUI tasks: If no high-level tool exists, plan to use 'inspect_ui' and 'desktop_automation'.\n\n");
         sb.append("PHASE 2: DYNAMIC STRATEGY\n");

@@ -12,6 +12,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -306,6 +308,40 @@ class WhatsAppWebToolTest {
         assertTrue(result.successful());
         assertEquals("POSTED", result.metadata().get("status"));
         assertTrue(result.observation().contains("Successfully posted new WhatsApp status"));
+    }
+
+    @Test
+    void testPostStatusMedia() throws Exception {
+        Path tempFile = Files.createTempFile("mark-status-test", ".png");
+        try {
+            ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+                "action", "post_status",
+                "file_path", tempFile.toString(),
+                "message", "Testing image status with caption!"
+            ));
+
+            ToolResultDTO result = whatsAppWebTool.execute(request);
+            assertTrue(result.successful());
+            assertEquals("MEDIA", result.metadata().get("type"));
+            assertEquals("POSTED", result.metadata().get("status"));
+            assertTrue(result.observation().contains("Successfully posted new WhatsApp photo status"));
+            assertTrue(result.observation().contains("Testing image status with caption!"));
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
+    }
+
+    @Test
+    void testPostStatusMediaFileNotFound() {
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "post_status",
+            "file_path", "non_existent_file_xyz_123.png",
+            "message", "Caption"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertFalse(result.successful());
+        assertTrue(result.observation().contains("Media file not found"));
     }
 
     @Test
