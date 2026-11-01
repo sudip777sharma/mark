@@ -228,17 +228,24 @@ public class AgentPromptBuilderService {
     }
 
         public String systemPromptForPlanning() {
-        return "You are an elite, universally adaptable autonomous agent planner.\n\n" +
-               "PHASE 1: DOMAIN CATEGORIZATION\n" +
-               "Analyze the user's goal and categorize the primary domain (e.g., Desktop UI Automation, File/Code Manipulation, Web Browsing, OS System Tasks). " +
-               "Based on this category, classify which tools are relevant and restrict your planning to them.\n\n" +
-               "PHASE 2: DYNAMIC STRATEGY\n" +
-               "- Do not rely on rigid assumptions. Every environment is dynamic.\n" +
-               "- For Code/File tasks: Prefer 'execute_command' and CLI tools over manual GUI clicks.\n" +
-               "- For GUI tasks: You MUST actively observe the screen. Always use 'inspect_ui' (using 'list_windows' or 'inspect_active') to orient yourself. " +
-               "If an expected element is missing, intelligently deduce what happened (e.g., a modal dialog appeared, a new window took focus) and inspect the active foreground window to adapt.\n\n" +
-               "PHASE 3: ACTIONABLE PLAN\n" +
-               "Break down the goal into a sequential, logical list of steps using ONLY the available tools. Keep steps concise.";
+        StringBuilder sb = new StringBuilder();
+        sb.append("You are an elite, universally adaptable autonomous agent planner.\n\n");
+        sb.append("AVAILABLE TOOLS:\n");
+        sb.append("You MUST plan steps that map directly to the capabilities of these tools:\n");
+        for (Tool tool : toolRegistry.availableTools()) {
+            sb.append("- ").append(tool.name()).append(": ").append(tool.description()).append("\n");
+        }
+        sb.append("\nPHASE 1: DOMAIN CATEGORIZATION & TOOL SELECTION\n");
+        sb.append("- PREFER HIGH-LEVEL SPECIALIZED TOOLS: Whenever a specialized domain tool exists, ALWAYS plan around that tool rather than generic GUI/browser clicks.\n");
+        sb.append("  * For WhatsApp tasks: Use 'whatsapp_web_automation' actions ('open_session', 'read_chat', 'verify_message', 'send_message', 'list_unread_chats') instead of manual browser clicks.\n");
+        sb.append("  * For Code/File tasks: Prefer 'execute_command' and CLI tools over manual GUI clicks.\n");
+        sb.append("  * For generic GUI tasks: If no high-level tool exists, plan to use 'inspect_ui' and 'desktop_automation'.\n\n");
+        sb.append("PHASE 2: DYNAMIC STRATEGY\n");
+        sb.append("- Keep the plan minimal, direct, and concise (usually 1-3 direct steps when using specialized tools).\n");
+        sb.append("- Do not break high-level tool operations into manual micro-steps like 'click search bar', 'type text', 'press enter'.\n\n");
+        sb.append("PHASE 3: ACTIONABLE PLAN\n");
+        sb.append("Break down the goal into a sequential, logical list of steps using ONLY the available tools. Keep steps concise.");
+        return sb.toString();
     }
 
             public String systemPromptForExecution(List<String> plan, AgentWorldStateModel worldState, String stateDelta) {

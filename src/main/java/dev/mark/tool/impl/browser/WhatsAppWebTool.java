@@ -193,12 +193,16 @@ public class WhatsAppWebTool implements Tool {
         // 1. First check if contact/number is already directly visible in the sidebar list
         try {
             page.waitForSelector("#pane-side", new Page.WaitForSelectorOptions().setTimeout(6000));
-            // Formatted phone match: e.g. "82809 01077" or "8280901077"
-            String formatted5_5 = last10.length() == 10 ? (last10.substring(0, 5) + " " + last10.substring(5)) : last10;
-            String selector = String.format(
-                "#pane-side span[title*='%s'], #pane-side span[title*='%s'], #pane-side span[title*='%s']",
-                clean, last10, formatted5_5
-            );
+            String selector;
+            if (!last10.isBlank()) {
+                String formatted5_5 = last10.length() == 10 ? (last10.substring(0, 5) + " " + last10.substring(5)) : last10;
+                selector = String.format(
+                    "#pane-side span[title*='%s'], #pane-side span[title*='%s'], #pane-side span[title*='%s']",
+                    clean, last10, formatted5_5
+                );
+            } else {
+                selector = String.format("#pane-side span[title*='%s']", clean);
+            }
             var item = page.locator(selector).first();
             if (item.count() > 0) {
                 log.info("Contact '{}' found directly in sidebar list, clicking to open...", contact);
@@ -256,6 +260,12 @@ public class WhatsAppWebTool implements Tool {
             page.navigate(url);
         } else {
             executeOpenChat(page, contact);
+            try {
+                page.waitForSelector("#main footer div[contenteditable='true']",
+                    new Page.WaitForSelectorOptions().setTimeout(10000));
+            } catch (Exception e) {
+                log.warn("Timed out waiting for input composer: {}", e.getMessage());
+            }
             var input = page.locator("#main footer div[contenteditable='true']").first();
             input.click();
             input.fill(message);
@@ -423,18 +433,21 @@ public class WhatsAppWebTool implements Tool {
         String jsUnreads = """
             () => {
                 const list = [];
-                const items = document.querySelectorAll('#pane-side div[role="listitem"]');
-                for (const item of items) {
-                    const badge = item.querySelector('span[aria-label*="unread"]');
-                    if (badge) {
-                        const titleEl = item.querySelector('span[title]');
+                // Query all unread badges across pane-side
+                const badges = document.querySelectorAll('#pane-side span[aria-label*="unread"], #pane-side div[aria-label*="unread"]');
+                for (const badge of badges) {
+                    const row = badge.closest('div[role="listitem"], div[data-testid*="cell-frame"], div.x10l6tqk') || badge.closest('div');
+                    if (row) {
+                        const titleEl = row.querySelector('span[title]');
                         const contact = titleEl ? titleEl.getAttribute('title') : 'Unknown';
-                        const textP = item.querySelector('span.copyable-text');
+                        const textP = row.querySelector('span.copyable-text, span.selectable-text');
                         const snippet = textP ? textP.innerText : '';
                         const ariaLabel = badge.getAttribute('aria-label') || '';
                         const countMatch = ariaLabel.match(/(\\d+)/);
                         const count = countMatch ? parseInt(countMatch[1]) : 1;
-                        list.push({ contact, count, snippet, raw: ariaLabel });
+                        if (!list.some(x => x.contact === contact)) {
+                            list.push({ contact, count, snippet, raw: ariaLabel });
+                        }
                     }
                 }
                 return JSON.stringify(list);
