@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -171,7 +172,10 @@ public class WhatsAppWebTool implements Tool {
 
             boolean hasQr = page.locator("canvas[aria-label*='Scan'], div[data-ref]").count() > 0;
             if (hasQr) {
-                return new ToolResultDTO(false, "WhatsApp Web requires QR code authentication. Please scan the QR code once in the browser window to pair your session.", Map.of("status", "QR_SCAN_REQUIRED", "action", "open_session"));
+                try {
+                    page.screenshot(new Page.ScreenshotOptions().setPath(Paths.get("mark-workspace/whatsapp_qr.png")));
+                } catch (Exception ignored) {}
+                return new ToolResultDTO(false, "WhatsApp Web requires QR code authentication. The Chromium browser window is open on your screen (QR image also saved at mark-workspace/whatsapp_qr.png). Please scan the QR code with WhatsApp on your phone (Linked Devices) to pair.", Map.of("status", "QR_SCAN_REQUIRED", "action", "open_session", "qr_image", "mark-workspace/whatsapp_qr.png"));
             }
 
             return new ToolResultDTO(true, "WhatsApp Web page loaded (initializing session).", Map.of("status", "INITIALIZING", "action", "open_session"));
