@@ -121,4 +121,15 @@ class OpenAiCompatibleProviderServiceTest {
         // Verify that the key was NOT marked as inactive
         verify(llmSettingsService, never()).markKeyAsInactive(anyLong(), anyString());
     }
+    @Test
+    void testPlan_ParsesValidJsonPlan() {
+        LlmRequestDTO request = new LlmRequestDTO(testConfigId, "sys", "open notepad", List.of(), List.of(), null);
+        when(requestBodySpec.retrieve()).thenReturn(responseSpec);
+        when(responseSpec.body(String.class)).thenReturn("{\"choices\":[{\"message\":{\"content\":\"```json\\n{\\\"steps\\\": [\\\"open notepad\\\", \\\"count images\\\"]}\\n```\"}}]}");
+
+        dev.mark.llm.dto.PlanResponseDTO plan = service.plan(request);
+        org.junit.jupiter.api.Assertions.assertNotNull(plan);
+        org.junit.jupiter.api.Assertions.assertEquals(2, plan.steps().size());
+        org.junit.jupiter.api.Assertions.assertEquals("open notepad", plan.steps().get(0));
+    }
 }

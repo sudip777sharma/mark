@@ -330,8 +330,6 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
             throw new LlmProviderException(name + " API plan request failed with status " + exception.getStatusCode() + ": " + exception.getResponseBodyAsString(), exception);
         } catch (org.springframework.web.client.RestClientException exception) {
             throw new LlmProviderException(name + " API plan request failed (Connection error)", exception);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException exception) {
-            throw new LlmProviderException(name + " returned malformed JSON during planning", exception);
         }
     }
 

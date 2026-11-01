@@ -190,7 +190,7 @@ public class AgentOrchestratorService {
                 meterRegistry.counter("agent.task.status", "status", "failed").increment();
             }
 
-        } catch (Exception e) {
+        } catch (Throwable e) {
             log.error("!!! [ORCHESTRATOR:FAILED] taskId={} error={}", taskId, e.getMessage(), e);
             meterRegistry.counter("agent.task.status", "status", "error").increment();
             return handleFailure(state, failureMessage(e));
@@ -409,7 +409,7 @@ public class AgentOrchestratorService {
                             details = "Timed out waiting for user response after 10 minutes.";
                             observation = new LlmToolObservationDTO(toolCall.id(), toolCall.name(), false, details, Map.of());
                             observations.set(observations.size() - 1, observation);
-                        } catch (Exception e) {
+                        } catch (Throwable e) {
                             pendingReplies.remove(taskUuid);
                             log.error("=== [ORCHESTRATOR:USER_INPUT_ERROR] taskId={}", state.taskId(), e);
                             details = "Error while awaiting user input: " + e.getMessage();
@@ -550,7 +550,7 @@ public class AgentOrchestratorService {
         taskSseService.broadcastTaskUpdate(entity);
     }
 
-    private String failureMessage(Exception exception) {
+    private String failureMessage(Throwable exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
     }
 }

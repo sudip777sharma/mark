@@ -104,11 +104,11 @@ public class InteractionController {
                     taskSseService.broadcastTaskUpdate(t);
                     log.info("<<< [INTERACTION:FAST_TRACK] taskId={} intent={} replyLength={}", taskId, routing.intent(), routing.reply().length());
                 }
-            } catch (Exception e) {
+            } catch (Throwable e) {
                 log.error("Error during async interaction routing for task {}", taskId, e);
                 taskRepository.findById(taskId).ifPresent(t -> {
                     t.setStatus(AgentStatusModel.FAILED);
-                    t.setFinalAnswer("Internal error during intent classification.");
+                    t.setFinalAnswer("Internal error: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
                     taskRepository.save(t);
                     taskSseService.broadcastTaskUpdate(t);
                 });
