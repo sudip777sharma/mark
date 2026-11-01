@@ -111,6 +111,15 @@ public class AgentOrchestratorService {
         return pendingReplies;
     }
 
+    public boolean submitReply(UUID taskId, String reply) {
+        CompletableFuture<String> future = pendingReplies.remove(taskId);
+        if (future != null) {
+            future.complete(reply);
+            return true;
+        }
+        return false;
+    }
+
     public TaskResponseDTO executeTask(String taskId, String goal) {
         log.info("event=task_started taskId={}", taskId);
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -355,6 +364,52 @@ public class AgentOrchestratorService {
                         }
                         saveState(state);
                         return;
+                    }
+
+                    if ("ask_user".equals(toolCall.name())) {
+                        String question = toolCall.arguments().get("question") instanceof String q ? q : "MARK requires your guidance to proceed.";
+                        log.info("=== [ORCHESTRATOR:WAITING_USER_INPUT] taskId={} question='{}'", state.taskId(), question);
+                        state.setStatus("NEEDS_INPUT");
+                        setAction(state, "Waiting for user input: " + question);
+
+                        UUID taskUuid = UUID.fromString(state.taskId());
+                        taskRepository.findById(taskUuid).ifPresent(t -> {
+                            t.setStatus(dev.mark.agent.model.AgentStatusModel.NEEDS_INPUT);
+                            t.setCurrentAction(question);
+                            taskRepository.save(t);
+                            taskSseService.broadcastTaskUpdate(t);
+                        });
+
+                        CompletableFuture<String> replyFuture = new CompletableFuture<>();
+                        pendingReplies.put(taskUuid, replyFuture);
+
+                        try {
+                            String userReply = replyFuture.get(10, java.util.concurrent.TimeUnit.MINUTES);
+                            log.info("=== [ORCHESTRATOR:USER_REPLIED] taskId={} reply='{}'", state.taskId(), userReply);
+                            details = "User provided response: " + userReply;
+                            observation = new LlmToolObservationDTO(toolCall.id(), toolCall.name(), true, details, Map.of("reply", userReply));
+                            observations.set(observations.size() - 1, observation);
+
+                            state.setStatus("EXECUTING");
+                            taskRepository.findById(taskUuid).ifPresent(t -> {
+                                t.setStatus(dev.mark.agent.model.AgentStatusModel.EXECUTING);
+                                t.setCurrentAction("User reply received. Resuming task execution...");
+                                taskRepository.save(t);
+                                taskSseService.broadcastTaskUpdate(t);
+                            });
+                        } catch (java.util.concurrent.TimeoutException te) {
+                            pendingReplies.remove(taskUuid);
+                            log.warn("=== [ORCHESTRATOR:USER_TIMEOUT] taskId={} Timed out waiting for reply", state.taskId());
+                            details = "Timed out waiting for user response after 10 minutes.";
+                            observation = new LlmToolObservationDTO(toolCall.id(), toolCall.name(), false, details, Map.of());
+                            observations.set(observations.size() - 1, observation);
+                        } catch (Exception e) {
+                            pendingReplies.remove(taskUuid);
+                            log.error("=== [ORCHESTRATOR:USER_INPUT_ERROR] taskId={}", state.taskId(), e);
+                            details = "Error while awaiting user input: " + e.getMessage();
+                            observation = new LlmToolObservationDTO(toolCall.id(), toolCall.name(), false, details, Map.of());
+                            observations.set(observations.size() - 1, observation);
+                        }
                     }
 
                     if (!toolResult.successful()

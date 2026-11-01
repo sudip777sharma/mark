@@ -817,16 +817,43 @@ public class WhatsAppWebTool implements Tool {
     private Path resolveFilePath(String rawPath) {
         if (rawPath == null || rawPath.isBlank()) return null;
         try {
+            // 1. Direct path check
             Path p = Paths.get(rawPath);
             if (Files.exists(p)) return p.toAbsolutePath().normalize();
 
-            // Check relative to current working directory (workspace root)
-            Path workspaceRelative = Paths.get(System.getProperty("user.dir", ".")).resolve(rawPath).normalize();
+            // 2. Relative to current working directory (workspace root)
+            Path workspaceDir = Paths.get(System.getProperty("user.dir", ".")).toAbsolutePath().normalize();
+            Path workspaceRelative = workspaceDir.resolve(rawPath).normalize();
             if (Files.exists(workspaceRelative)) return workspaceRelative.toAbsolutePath();
 
-            // Check user home / desktop
-            Path onDesktop = Paths.get(System.getProperty("user.home", "")).resolve("Desktop").resolve(rawPath).normalize();
-            if (Files.exists(onDesktop)) return onDesktop.toAbsolutePath();
+            // 3. Parent directory (e.g. if mark is inside Desktop, parent is Desktop)
+            if (workspaceDir.getParent() != null) {
+                Path parentRelative = workspaceDir.getParent().resolve(rawPath).normalize();
+                if (Files.exists(parentRelative)) return parentRelative.toAbsolutePath();
+            }
+
+            // 4. Desktop resolution (handles both standard Desktop and OneDrive Desktop)
+            String strippedDesktop = rawPath.replace('\\', '/');
+            if (strippedDesktop.startsWith("Desktop/")) {
+                strippedDesktop = strippedDesktop.substring(8);
+            } else if (strippedDesktop.equals("Desktop")) {
+                strippedDesktop = "";
+            }
+
+            String userHome = System.getProperty("user.home", "");
+            if (!userHome.isBlank()) {
+                // OneDrive Desktop
+                Path oneDriveDesktop = Paths.get(userHome, "OneDrive", "Desktop").resolve(strippedDesktop).normalize();
+                if (Files.exists(oneDriveDesktop)) return oneDriveDesktop.toAbsolutePath();
+
+                // Standard Desktop
+                Path stdDesktop = Paths.get(userHome, "Desktop").resolve(strippedDesktop).normalize();
+                if (Files.exists(stdDesktop)) return stdDesktop.toAbsolutePath();
+
+                // User home direct
+                Path homeRelative = Paths.get(userHome).resolve(rawPath).normalize();
+                if (Files.exists(homeRelative)) return homeRelative.toAbsolutePath();
+            }
         } catch (Exception e) {
             log.warn("Error resolving file path '{}': {}", rawPath, e.getMessage());
         }
@@ -835,6 +862,51 @@ public class WhatsAppWebTool implements Tool {
 
     private ToolResultDTO executePostStatus(Page page, String text) {
         return executePostStatus(page, text, null);
+    }
+
+    private void postSingleMediaStatus(Page page, Path file, String caption) {
+        var fileInput = page.locator("input[accept*='image'], input[accept*='video'], input[type='file']").first();
+        if (fileInput.count() == 0) {
+            var addBtn = page.locator("button[aria-label*='Add status' i], button:has(span[data-icon='status-add']), div[role='button']:has-text('Add status'), div[role='button']:has-text('My status')").first();
+            if (addBtn.count() > 0) {
+                addBtn.click();
+                page.waitForTimeout(500);
+            }
+        }
+
+        fileInput = page.locator("input[accept*='image'], input[accept*='video'], input[type='file']").first();
+        if (fileInput.count() > 0) {
+            fileInput.setInputFiles(file);
+        } else {
+            final Path targetFile = file;
+            var fileChooser = page.waitForFileChooser(new Page.WaitForFileChooserOptions().setTimeout(4000), () -> {
+                var photoOption = page.locator("button:has-text('Photos'), li:has-text('Photos'), div[role='button']:has-text('Photos'), span[data-icon='image'], span[data-icon='camera']").first();
+                if (photoOption.count() > 0) {
+                    photoOption.click();
+                }
+            });
+            fileChooser.setFiles(targetFile);
+        }
+
+        page.waitForSelector("button[aria-label='Send'], button:has(span[data-icon='send']), span[data-icon='send'], div[contenteditable='true']",
+            new Page.WaitForSelectorOptions().setTimeout(12000));
+
+        if (caption != null && !caption.isBlank()) {
+            var captionBox = page.locator("div[contenteditable='true'], div[role='textbox']").first();
+            if (captionBox.count() > 0) {
+                captionBox.click();
+                captionBox.fill(caption);
+                page.waitForTimeout(500);
+            }
+        }
+
+        var sendBtn = page.locator("button[aria-label='Send'], button:has(span[data-icon='send']), span[data-icon='send']").first();
+        if (sendBtn.count() > 0) {
+            sendBtn.click();
+        } else {
+            page.keyboard().press("Enter");
+        }
+        page.waitForTimeout(2500);
     }
 
     private ToolResultDTO executePostStatus(Page page, String text, String rawFilePath) {
@@ -860,73 +932,78 @@ public class WhatsAppWebTool implements Tool {
 
         try {
             if (hasFile) {
-                // Photo / Video status upload
-                var fileInput = page.locator("input[accept*='image'], input[accept*='video'], input[type='file']").first();
-                if (fileInput.count() == 0) {
-                    var addBtn = page.locator("button[aria-label*='Add status' i], button:has(span[data-icon='status-add']), div[role='button']:has-text('Add status'), div[role='button']:has-text('My status')").first();
-                    if (addBtn.count() > 0) {
-                        addBtn.click();
-                        page.waitForTimeout(500);
+                if (Files.isDirectory(resolvedFile)) {
+                    List<Path> imageFiles = new ArrayList<>();
+                    try (var stream = Files.list(resolvedFile)) {
+                        imageFiles = stream
+                            .filter(Files::isRegularFile)
+                            .filter(path -> {
+                                String name = path.getFileName().toString().toLowerCase();
+                                return name.endsWith(".jpg") || name.endsWith(".jpeg") || name.endsWith(".png") || name.endsWith(".webp");
+                            })
+                            .sorted(Comparator.comparing(Path::getFileName))
+                            .toList();
                     }
-                }
 
-                fileInput = page.locator("input[accept*='image'], input[accept*='video'], input[type='file']").first();
-                if (fileInput.count() > 0) {
-                    fileInput.setInputFiles(resolvedFile);
-                } else {
-                    // Try triggering file chooser via Photos & videos button
-                    try {
-                        final Path targetFile = resolvedFile;
-                        var fileChooser = page.waitForFileChooser(new Page.WaitForFileChooserOptions().setTimeout(4000), () -> {
-                            var photoOption = page.locator("button:has-text('Photos'), li:has-text('Photos'), div[role='button']:has-text('Photos'), span[data-icon='image'], span[data-icon='camera']").first();
-                            if (photoOption.count() > 0) {
-                                photoOption.click();
-                            }
-                        });
-                        fileChooser.setFiles(targetFile);
-                    } catch (Exception fcEx) {
+                    if (imageFiles.isEmpty()) {
                         ensureChatsPanel(page);
-                        return new ToolResultDTO(false, "Could not locate photo status upload input in WhatsApp Web: " + fcEx.getMessage(),
+                        return new ToolResultDTO(false, "No valid image files (.jpg, .jpeg, .png, .webp) found in directory: " + resolvedFile,
                             Map.of("action", "post_status", "file_path", resolvedFile.toString()));
                     }
-                }
 
-                // Wait for media editor overlay and caption field
-                page.waitForSelector("button[aria-label='Send'], button:has(span[data-icon='send']), span[data-icon='send'], div[contenteditable='true']",
-                    new Page.WaitForSelectorOptions().setTimeout(12000));
+                    log.info("Found {} images in directory '{}', posting each to WhatsApp Web status...", imageFiles.size(), resolvedFile);
 
-                if (text != null && !text.isBlank()) {
-                    var captionBox = page.locator("div[contenteditable='true'], div[role='textbox']").first();
-                    if (captionBox.count() > 0) {
-                        captionBox.click();
-                        captionBox.fill(text);
-                        page.waitForTimeout(500);
+                    int postedCount = 0;
+                    for (int i = 0; i < imageFiles.size(); i++) {
+                        Path img = imageFiles.get(i);
+                        String itemCaption = text;
+                        if (text != null && !text.isBlank()) {
+                            if (imageFiles.size() > 1) {
+                                itemCaption = text.trim() + " (" + (i + 1) + "/" + imageFiles.size() + ")";
+                            }
+                        }
+
+                        postSingleMediaStatus(page, img, itemCaption);
+                        postedCount++;
+                        page.waitForTimeout(1500);
                     }
-                }
 
-                var sendBtn = page.locator("button[aria-label='Send'], button:has(span[data-icon='send']), span[data-icon='send']").first();
-                if (sendBtn.count() > 0) {
-                    sendBtn.click();
+                    ensureChatsPanel(page);
+
+                    String summary = String.format("Successfully posted %d photo status updates from directory '%s' to WhatsApp Web",
+                        postedCount, resolvedFile.getFileName());
+                    if (text != null && !text.isBlank()) {
+                        summary += " with captions starting with: \"" + text + "\"";
+                    }
+
+                    Map<String, Object> meta = new HashMap<>();
+                    meta.put("action", "post_status");
+                    meta.put("type", "DIRECTORY_MEDIA");
+                    meta.put("status", "POSTED");
+                    meta.put("posted_count", postedCount);
+                    meta.put("directory", resolvedFile.toString());
+                    if (text != null && !text.isBlank()) meta.put("caption_prefix", text);
+
+                    return new ToolResultDTO(true, summary, meta);
                 } else {
-                    page.keyboard().press("Enter");
+                    // Single photo / video status upload
+                    postSingleMediaStatus(page, resolvedFile, text);
+                    ensureChatsPanel(page);
+
+                    String msg = "Successfully posted new WhatsApp photo status with file '" + resolvedFile.getFileName() + "'";
+                    if (text != null && !text.isBlank()) {
+                        msg += " and caption: \"" + text + "\"";
+                    }
+
+                    Map<String, Object> meta = new HashMap<>();
+                    meta.put("action", "post_status");
+                    meta.put("type", "MEDIA");
+                    meta.put("status", "POSTED");
+                    meta.put("file_path", resolvedFile.toString());
+                    if (text != null && !text.isBlank()) meta.put("caption", text);
+
+                    return new ToolResultDTO(true, msg, meta);
                 }
-                page.waitForTimeout(2500);
-
-                ensureChatsPanel(page);
-
-                String msg = "Successfully posted new WhatsApp photo status with file '" + resolvedFile.getFileName() + "'";
-                if (text != null && !text.isBlank()) {
-                    msg += " and caption: \"" + text + "\"";
-                }
-
-                Map<String, Object> meta = new HashMap<>();
-                meta.put("action", "post_status");
-                meta.put("type", "MEDIA");
-                meta.put("status", "POSTED");
-                meta.put("file_path", resolvedFile.toString());
-                if (text != null && !text.isBlank()) meta.put("caption", text);
-
-                return new ToolResultDTO(true, msg, meta);
             } else {
                 // Pure text status
                 var pencilBtn = page.locator("button[aria-label*='Text' i], button[aria-label*='Add status' i], button:has(span[data-icon='status-pencil']), button:has(span[data-icon='pencil'])").first();

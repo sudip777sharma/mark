@@ -73,6 +73,16 @@ public class TaskController {
         return llmLogRepository.findByTaskIdOrderByCreatedAtAsc(taskId.toString());
     }
 
+    @PostMapping("/{taskId}/reply")
+    @ResponseStatus(HttpStatus.OK)
+    public void replyToTask(@PathVariable UUID taskId, @RequestBody String reply) {
+        log.info(">>> [TASK:REPLY_RECEIVED] taskId={} reply='{}'", taskId, reply);
+        boolean delivered = agentEngine.submitReply(taskId, reply);
+        if (!delivered) {
+            log.warn("--- [TASK:NO_PENDING_REPLY] taskId={} had no waiting reply future", taskId);
+        }
+    }
+
     private TaskResponseDTO mapToResponse(TaskEntity entity) {
         List<AgentStepModel> steps = entity.getSteps().stream()
                 .map(s -> new AgentStepModel(s.getStepNumber(), s.getDescription(), s.getToolName(), s.getToolArguments(), s.getOutcome(), s.getProvider(), s.getTimestamp()))

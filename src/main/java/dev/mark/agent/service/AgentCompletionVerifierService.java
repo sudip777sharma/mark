@@ -35,6 +35,15 @@ public class AgentCompletionVerifierService {
             return AgentVerificationResultModel.failure("Completion is empty");
         }
 
+        // Reject completion if the agent is asking clarification questions instead of completing the goal
+        String lowerCompletion = completionContent.toLowerCase().trim();
+        if (lowerCompletion.contains("could you please clarify") || lowerCompletion.contains("please clarify")
+                || lowerCompletion.contains("i need to clarify") || lowerCompletion.contains("clarification needed")
+                || (lowerCompletion.endsWith("?") && !isDirectResponseGoal(goal))) {
+            log.warn("<<< [VERIFIER:FAILED] goal='{}' reason='Completion is asking for user clarification rather than completing the goal'", goal);
+            return AgentVerificationResultModel.failure("Completion is asking for user clarification. Call the 'ask_user' tool to pause and prompt the user instead of finishing.");
+        }
+
         boolean hasSuccessfulToolObservation =
                 messages.stream()
                         .filter(m -> "tool".equals(m.role()) && m.toolObservation() != null)

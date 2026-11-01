@@ -10,6 +10,7 @@ import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -85,9 +86,20 @@ public class ListDirectoryTool implements Tool {
         Object raw = request.arguments().get("path");
         String pathStr = (raw instanceof String s && !s.isBlank()) ? s : ".";
         try {
-            Path resolved = FileSystemUtils.resolveSandboxed(basePath, pathStr);
-            if (!Files.exists(resolved)) {
-                return new ToolResultDTO(false, "Directory not found: " + pathStr, Map.of());
+            Path resolved;
+            try {
+                resolved = FileSystemUtils.resolveSandboxed(basePath, pathStr);
+            } catch (IllegalArgumentException e) {
+                resolved = null;
+            }
+
+            if (resolved == null || !Files.exists(resolved)) {
+                Path desktopFallback = resolveDesktopPath(pathStr);
+                if (desktopFallback != null && Files.exists(desktopFallback)) {
+                    resolved = desktopFallback;
+                } else {
+                    return new ToolResultDTO(false, "Directory not found: " + pathStr, Map.of());
+                }
             }
             if (!Files.isDirectory(resolved)) {
                 return new ToolResultDTO(false, "Not a directory: " + pathStr, Map.of());
@@ -115,5 +127,27 @@ public class ListDirectoryTool implements Tool {
         } catch (IOException e) {
             return new ToolResultDTO(false, "Failed to list directory: " + e.getMessage(), Map.of());
         }
+    }
+
+    private Path resolveDesktopPath(String pathStr) {
+        String stripped = pathStr.replace('\\', '/');
+        if (stripped.startsWith("Desktop/")) {
+            stripped = stripped.substring(8);
+        } else if (stripped.equals("Desktop")) {
+            stripped = "";
+        } else if (stripped.startsWith("./Desktop/")) {
+            stripped = stripped.substring(10);
+        } else {
+            return null;
+        }
+
+        String userHome = System.getProperty("user.home", "");
+        if (!userHome.isBlank()) {
+            Path oneDriveDesktop = Paths.get(userHome, "OneDrive", "Desktop").resolve(stripped).normalize();
+            if (Files.exists(oneDriveDesktop)) return oneDriveDesktop;
+            Path stdDesktop = Paths.get(userHome, "Desktop").resolve(stripped).normalize();
+            if (Files.exists(stdDesktop)) return stdDesktop;
+        }
+        return null;
     }
 }

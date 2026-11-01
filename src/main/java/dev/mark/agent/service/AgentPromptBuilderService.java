@@ -239,6 +239,7 @@ public class AgentPromptBuilderService {
         sb.append("- PREFER HIGH-LEVEL SPECIALIZED TOOLS: Whenever a specialized domain tool exists, ALWAYS plan around that tool rather than generic GUI/browser clicks.\n");
         sb.append("  * For WhatsApp tasks: Use 'whatsapp_web_automation' actions ('open_session', 'read_chat', 'verify_message', 'send_message', 'list_unread_chats', 'post_status', 'get_my_status', 'list_unseen_statuses', 'view_contact_status', 'start_audio_call', 'start_video_call') instead of manual browser clicks.\n");
         sb.append("  * For Code/File tasks: Prefer 'execute_command' and CLI tools over manual GUI clicks.\n");
+        sb.append("  * For User Clarification & Guidance: If the goal is ambiguous or required paths/files are missing, use 'ask_user' to pause and ask the user.\n");
         sb.append("  * For generic GUI tasks: If no high-level tool exists, plan to use 'inspect_ui' and 'desktop_automation'.\n\n");
         sb.append("PHASE 2: DYNAMIC STRATEGY\n");
         sb.append("- Keep the plan minimal, direct, and concise (usually 1-3 direct steps when using specialized tools).\n");
@@ -292,6 +293,7 @@ public class AgentPromptBuilderService {
         sb.append("- **BATCHING**: You CAN and SHOULD output multiple tool calls sequentially in a single response to form a segment of steps (e.g., focus -> delay -> click -> delay -> type). Do not wait for intermediate observations if the sequence is deterministic.\n");
         sb.append("- When the task is complete, return a concise final response WITHOUT a tool call.\n");
         sb.append("- Do not claim success before tool results provide evidence.\n");
+        sb.append("- HUMAN CLARIFICATION: If you need clarification from the user or cannot locate a required file or directory, NEVER return raw text asking questions as completion. You MUST call the 'ask_user' tool with your question. Calling 'ask_user' pauses execution and opens an interactive prompt for the user.\n");
         sb.append("- If you perform a 'desktop_automation' action that opens an application or triggers a slow UI update, you MUST use the 'delay' action to wait before taking the next step.\n");
         sb.append("- If inspect_ui fails or returns insufficient data, use 'screenshot' as a fallback to capture what is on screen.\n");
 

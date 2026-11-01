@@ -345,6 +345,31 @@ class WhatsAppWebToolTest {
     }
 
     @Test
+    void testPostStatusDirectory() throws Exception {
+        Path tempDir = Files.createTempDirectory("mark-status-dir-test");
+        Path img1 = Files.createFile(tempDir.resolve("img1.png"));
+        Path img2 = Files.createFile(tempDir.resolve("img2.jpeg"));
+        try {
+            ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+                "action", "post_status",
+                "file_path", tempDir.toString(),
+                "message", "Testing MARK AI photo status 📸🚀"
+            ));
+
+            ToolResultDTO result = whatsAppWebTool.execute(request);
+            assertTrue(result.successful());
+            assertEquals("DIRECTORY_MEDIA", result.metadata().get("type"));
+            assertEquals("POSTED", result.metadata().get("status"));
+            assertEquals(2, result.metadata().get("posted_count"));
+            assertTrue(result.observation().contains("Successfully posted 2 photo status updates"));
+        } finally {
+            Files.deleteIfExists(img1);
+            Files.deleteIfExists(img2);
+            Files.deleteIfExists(tempDir);
+        }
+    }
+
+    @Test
     void testViewContactStatus() {
         when(page.evaluate(anyString(), any())).thenReturn("{\"found\":true}");
 
