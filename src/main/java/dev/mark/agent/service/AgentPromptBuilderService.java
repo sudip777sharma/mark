@@ -247,13 +247,16 @@ public class AgentPromptBuilderService {
         sb.append("    4. Open the recorded video location in File Explorer via 'screen_recorder' ('action': 'open_folder')\n");
         sb.append("    5. Post the recorded video to WhatsApp Web via 'whatsapp_web_automation' ('action': 'post_status', 'file_path': '<recorded_mp4>', 'message': '<caption>')\n");
         sb.append("  * For Code/File tasks: Prefer 'execute_command' and CLI tools over manual GUI clicks.\n");
+        sb.append("  * For Opening Windows Applications: To launch apps (such as Notepad, Calculator, Paint), plan to use 'execute_command' with command 'notepad', 'calc', 'mspaint', or 'start notepad'. Never use 'desktop_automation' to launch an app.\n");
+        sb.append("  * For Finding / Counting Files: To count or list files and images in a folder, plan to use 'list_directory' (or 'search_file_content'). Never use 'desktop_automation' to browse directories.\n");
         sb.append("  * For User Clarification & Guidance: If the goal is ambiguous or required paths/files are missing, use 'ask_user' to pause and ask the user.\n");
         sb.append("  * For generic GUI tasks: If no high-level tool exists, plan to use 'inspect_ui' and 'desktop_automation'.\n\n");
         sb.append("PHASE 2: DYNAMIC STRATEGY\n");
         sb.append("- Keep the plan minimal, direct, and concise (usually 1-3 direct steps when using specialized tools).\n");
         sb.append("- Do not break high-level tool operations into manual micro-steps like 'click search bar', 'type text', 'press enter'.\n\n");
         sb.append("PHASE 3: ACTIONABLE PLAN\n");
-        sb.append("Break down the goal into a sequential, logical list of steps using ONLY the available tools. Keep steps concise.");
+        sb.append("First, explain your decomposition and tool selection reasoning inside <thinking>...</thinking> tags.\n");
+        sb.append("Then output the final plan as a JSON object with a single key 'steps' containing an array of concise steps. Keep steps concise.");
         return sb.toString();
     }
 
@@ -307,6 +310,8 @@ public class AgentPromptBuilderService {
         sb.append("- SCREEN RECORDING COMPLETION: Always call 'stop_recording' on 'screen_recorder' before opening, moving, or using the recorded video file so that FFmpeg finishes writing and muxing.\n");
         sb.append("- WHATSAPP STATUS POSTING: When posting photo or video status, ALWAYS pass 'file_path' with the exact local path to the image/video file or image directory. For text status, pass 'message'.\n");
         sb.append("- If inspect_ui fails or returns insufficient data, use 'screenshot' as a fallback to capture what is on screen.\n");
+        sb.append("- OPENING WINDOWS APPS: To open desktop applications (e.g. Notepad, Calculator), call 'execute_command' with command 'notepad' or 'calc', or launch via Run dialog. Never use 'desktop_automation' to start an unlaunched application.\n");
+        sb.append("- COUNTING / LISTING FILES: To count or list files and images in a folder, call 'list_directory' with the directory path. Never use 'desktop_automation' to inspect directories.\n");
 
         if (plan != null && !plan.isEmpty()) {
             sb.append("\nYour Execution Plan:\n");

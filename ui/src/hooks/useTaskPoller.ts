@@ -29,6 +29,7 @@ export function useTaskPoller() {
 
     if (lastTaskIdRef.current !== taskId) {
       lastTaskIdRef.current = taskId;
+      clearLlmThoughtStream();
       lastStatusRef.current = activeTask?.status || null;
       lastActionRef.current = activeTask?.currentAction || null;
       seenStepsCountRef.current = activeTask?.steps?.length || 0;
@@ -75,9 +76,6 @@ export function useTaskPoller() {
 
         // Only fetch the full list if the status transitions (e.g. CREATED -> EXECUTING or EXECUTING -> COMPLETED)
         if (lastStatusRef.current !== freshTask.status) {
-            if (freshTask.status === 'PLANNING') {
-              clearLlmThoughtStream();
-            }
             lastStatusRef.current = freshTask.status;
             taskApi.listTasks().then((list) => {
               if (list.length > 0) setTasks(list);
@@ -85,9 +83,6 @@ export function useTaskPoller() {
         }
         
         if (lastActionRef.current !== freshTask.currentAction) {
-            if (freshTask.currentAction === 'Thinking (Waiting for LLM)...') {
-                clearLlmThoughtStream();
-            }
             lastActionRef.current = freshTask.currentAction;
         }
 

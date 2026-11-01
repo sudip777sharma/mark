@@ -356,14 +356,20 @@ public class AgentOrchestratorService {
                             outcome + ": " + details, response.provider(), java.time.Instant.now()));
 
                     if ("task_complete".equals(toolCall.name()) && toolResult.successful()) {
-                        log.info("=== [ORCHESTRATOR:TASK_COMPLETE] taskId={} marked complete via task_complete tool", state.taskId());
-                        state.setStatus("COMPLETED");
-                        state.setFinalAnswer(details);
-                        for (LlmToolObservationDTO obs : observations) {
-                            state.addMessage(LlmMessageDTO.toolObservation(obs));
+                        String summaryStr = toolCall.arguments().get("summary") instanceof String s ? s.trim().toLowerCase() : "";
+                        if (summaryStr.contains("no task completed") || summaryStr.contains("not completed yet") || summaryStr.contains("nothing completed")) {
+                            log.warn("=== [ORCHESTRATOR:REJECT_TASK_COMPLETE] taskId={} Rejected false completion: '{}'", state.taskId(), summaryStr);
+                            shouldAbortBatch = true;
+                        } else {
+                            log.info("=== [ORCHESTRATOR:TASK_COMPLETE] taskId={} marked complete via task_complete tool", state.taskId());
+                            state.setStatus("COMPLETED");
+                            state.setFinalAnswer(details);
+                            for (LlmToolObservationDTO obs : observations) {
+                                state.addMessage(LlmMessageDTO.toolObservation(obs));
+                            }
+                            saveState(state);
+                            return;
                         }
-                        saveState(state);
-                        return;
                     }
 
                     if ("ask_user".equals(toolCall.name())) {

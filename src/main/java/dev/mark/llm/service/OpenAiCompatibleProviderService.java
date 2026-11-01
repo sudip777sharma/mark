@@ -137,10 +137,16 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
                                                     
                                                     com.fasterxml.jackson.databind.JsonNode functionNode = tcNode.path("function");
                                                     if (!functionNode.isMissingNode()) {
-                                                        if (functionNode.has("name")) builder.put("name", functionNode.get("name").asText());
+                                                        if (functionNode.has("name")) {
+                                                            String fname = functionNode.get("name").asText();
+                                                            builder.put("name", fname);
+                                                            onChunk.accept("\n⚙️ [Tool Call: " + fname + "]\n");
+                                                        }
                                                         if (functionNode.has("arguments")) {
                                                             String existingArgs = (String) builder.getOrDefault("arguments", "");
-                                                            builder.put("arguments", existingArgs + functionNode.get("arguments").asText());
+                                                            String argChunk = functionNode.get("arguments").asText();
+                                                            builder.put("arguments", existingArgs + argChunk);
+                                                            onChunk.accept(argChunk);
                                                         }
                                                     }
                                                 }
@@ -201,7 +207,7 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
     public PlanResponseDTO planStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
         try {
             Map<String, Object> requestBody = buildRequestBody(request);
-            requestBody.put("response_format", Map.of("type", "json_object"));
+
             if (onChunk != null) {
                 requestBody.put("stream", true);
             }
@@ -211,14 +217,14 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
             for (Map<String, Object> msg : messages) {
                 if ("system".equals(msg.get("role"))) {
                     Map<String, Object> newMsg = new LinkedHashMap<>(msg);
-                    newMsg.put("content", newMsg.get("content") + "\n\nIMPORTANT: You must return a valid JSON object with a single key 'steps' that contains a JSON array of strings.");
+                    newMsg.put("content", newMsg.get("content") + "\n\nFirst, output your reasoning inside <thinking>...</thinking> tags. Then output a JSON object with a single key 'steps' containing a list of concise steps:\n{\n  \"steps\": [\"step 1\", \"step 2\"]\n}");
                     messages.set(messages.indexOf(msg), newMsg);
                     hasSystem = true;
                     break;
                 }
             }
             if (!hasSystem) {
-                messages.add(0, Map.of("role", "system", "content", "You must return a valid JSON object with a single key 'steps' that contains a JSON array of strings."));
+                messages.add(0, Map.of("role", "system", "content", "You are an autonomous planner. First, output your reasoning inside <thinking>...</thinking> tags. Then output a JSON object with a single key 'steps' containing a list of concise steps:\n{\n  \"steps\": [\"step 1\", \"step 2\"]\n}"));
             }
 
             log.info(">>> [LLM PLAN REQUEST - {}]", name);
@@ -282,6 +288,8 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
 
             log.info("<<< [LLM PLAN RESPONSE - {}]", name);
             log.info("<<< Raw Content:\n{}", fullContent);
+
+            List<String> steps = new ArrayList<>();
             String content = fullContent.trim();
 
             if (content.startsWith("```json")) {
@@ -292,13 +300,28 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
                 if (content.endsWith("```")) content = content.substring(0, content.length() - 3);
             }
 
-            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(content);
+            try {
+                String jsonBlock = extractJson(fullContent);
+                com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(jsonBlock);
             com.fasterxml.jackson.databind.JsonNode stepsNode = root.path("steps");
-            List<String> steps = new ArrayList<>();
+
             if (stepsNode.isArray()) {
                 for (com.fasterxml.jackson.databind.JsonNode n : stepsNode) {
                     steps.add(n.asText());
                 }
+            }
+            } catch (Exception e) {
+                log.warn("Failed to parse plan JSON: {}. Using line-by-line fallback.", e.getMessage());
+                for (String line : fullContent.split("\n")) {
+                    String trimmed = line.trim();
+                    if (trimmed.matches("^\\d+\\.\\s+.*")) {
+                        steps.add(trimmed.replaceFirst("^\\d+\\.\\s+", ""));
+                    }
+                }
+            }
+            if (steps.isEmpty()) {
+                log.warn("Plan had no parsed steps, fallback to goal");
+                steps.add(request.userPrompt() != null ? request.userPrompt() : "Execute goal");
             }
             return new PlanResponseDTO(steps);
 
@@ -323,6 +346,32 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
                 }
             }
         }
+    }
+
+    private String extractJson(String raw) {
+        if (raw == null || raw.isBlank()) return "{}";
+        String trimmed = raw.trim();
+        if (trimmed.contains("```json")) {
+            int start = trimmed.indexOf("```json") + 7;
+            int end = trimmed.indexOf("```", start);
+            if (end > start) {
+                return trimmed.substring(start, end).trim();
+            }
+        }
+        if (trimmed.contains("```")) {
+            int start = trimmed.indexOf("```") + 3;
+            int end = trimmed.indexOf("```", start);
+            if (end > start) {
+                return trimmed.substring(start, end).trim();
+            }
+        }
+        String noThinking = trimmed.replaceAll("(?s)<thinking>.*?</thinking>", "").trim();
+        int firstBrace = noThinking.indexOf('{');
+        int lastBrace = noThinking.lastIndexOf('}');
+        if (firstBrace != -1 && lastBrace > firstBrace) {
+            return noThinking.substring(firstBrace, lastBrace + 1).trim();
+        }
+        return noThinking;
     }
 
     private Map<String, Object> buildRequestBody(LlmRequestDTO request) {

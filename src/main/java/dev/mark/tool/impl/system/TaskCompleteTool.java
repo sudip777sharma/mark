@@ -50,6 +50,11 @@ public class TaskCompleteTool implements Tool {
             return new ToolResultDTO(false, "Missing required argument 'summary'", Map.of());
         }
 
+        String lower = summary.toLowerCase().trim();
+        if (lower.contains("no task completed") || lower.contains("not completed yet") || lower.contains("nothing completed")) {
+            return new ToolResultDTO(false, "Task completion rejected: summary states '" + summary + "'. You must execute the necessary tools to perform the task before calling task_complete.", Map.of("summary", summary));
+        }
+
         // The AgentOrchestratorService will see this success message and should terminate the loop
         return new ToolResultDTO(true, "Goal successfully completed! Summary: " + summary, Map.of("summary", summary));
     }
