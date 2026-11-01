@@ -602,14 +602,14 @@ public class WhatsAppWebTool implements Tool {
 
     private boolean ensureStatusPanel(Page page) {
         try {
-            var statusHeading = page.locator("header:has-text('Status'), div:has-text('Recent updates'), div:has-text('My status')").first();
-            if (statusHeading.count() > 0 && statusHeading.isVisible()) {
+            var statusHeader = page.locator("#side header:has-text('Status'), div[data-testid='status-panel']").first();
+            if (statusHeader.count() > 0 && statusHeader.isVisible()) {
                 return true;
             }
-            var statusBtn = page.locator("button[aria-label='Status'], button:has(span[data-icon='status-v3']), button:has(span[data-icon='status-refreshed']), button:has(span[data-icon='status-outline']), button:has-text('Status')").first();
+            var statusBtn = page.locator("button[aria-label*='Status' i], div[role='button'][aria-label*='Status' i], button:has(span[data-icon*='status']), span[data-icon*='status']").first();
             if (statusBtn.count() > 0) {
                 statusBtn.click();
-                page.waitForTimeout(800);
+                page.waitForTimeout(1000);
                 return true;
             }
         } catch (Exception e) {
@@ -620,7 +620,7 @@ public class WhatsAppWebTool implements Tool {
 
     private void ensureChatsPanel(Page page) {
         try {
-            var chatsBtn = page.locator("button[aria-label='Chats'], button:has(span[data-icon='chats-outline']), button:has(span[data-icon='chat']), button:has-text('Chats')").first();
+            var chatsBtn = page.locator("button[aria-label*='Chats' i], div[role='button'][aria-label*='Chats' i], button:has(span[data-icon*='chat']), span[data-icon*='chat']").first();
             if (chatsBtn.count() > 0) {
                 chatsBtn.click();
                 page.waitForTimeout(600);
@@ -851,19 +851,69 @@ public class WhatsAppWebTool implements Tool {
         }
 
         ensureStatusPanel(page);
+        page.waitForTimeout(1000);
 
         try {
-            String selector = String.format(
-                "div[data-testid='status-item']:has-text('%s'), div[role='button']:has(span[title*='%s']), div:has(span[title*='%s'])",
-                contact, contact, contact
-            );
-            var item = page.locator(selector).first();
-            if (item.count() == 0) {
-                ensureChatsPanel(page);
-                return new ToolResultDTO(false, "No status found for contact '" + contact + "'.", Map.of("contact", contact, "action", "view_contact_status"));
+            String jsExpandAndClick = """
+                (contactName) => {
+                    // 1. Try to expand 'Viewed' or 'Viewed updates' accordion if collapsed
+                    const buttons = Array.from(document.querySelectorAll('div[role="button"], button, div.x1280gxy'));
+                    const viewedHeader = buttons.find(b => {
+                        const txt = (b.innerText || '').trim();
+                        return (txt.startsWith('Viewed updates') || txt.startsWith('Viewed')) && !txt.includes('\\n');
+                    });
+                    if (viewedHeader) {
+                        const isExpanded = viewedHeader.getAttribute('aria-expanded');
+                        const hasChevronRight = viewedHeader.querySelector('span[data-icon="chevron-right"], span[data-icon="chevron-down"]');
+                        if (isExpanded === 'false' || (hasChevronRight && viewedHeader.innerHTML.includes('chevron-right'))) {
+                            viewedHeader.click();
+                        }
+                    }
+
+                    // 2. Locate contact status row in the Status panel
+                    const rows = Array.from(document.querySelectorAll('div[role="button"], div[data-testid="status-item"], button'));
+                    const match = rows.find(r => {
+                        const text = (r.innerText || '').toLowerCase();
+                        const titleEl = r.querySelector('span[title]');
+                        const title = (titleEl ? titleEl.getAttribute('title') || titleEl.innerText : '').toLowerCase();
+                        const target = contactName.toLowerCase();
+                        const isMyStatus = text.includes('my status');
+                        const isSearch = text.includes('search');
+                        const isHeader = text.startsWith('recent') || text.startsWith('viewed');
+                        return !isMyStatus && !isSearch && !isHeader && (title === target || title.includes(target) || text.includes(target));
+                    });
+
+                    if (match) {
+                        match.scrollIntoView({ block: 'center', behavior: 'instant' });
+                        match.click();
+                        return JSON.stringify({ found: true });
+                    }
+                    return JSON.stringify({ found: false });
+                }
+                """;
+
+            String jsonResult = (String) page.evaluate(jsExpandAndClick, contact);
+            boolean found = false;
+            try {
+                JsonNode root = objectMapper.readTree(jsonResult);
+                found = root.has("found") && root.get("found").asBoolean();
+            } catch (Exception ignored) {}
+
+            if (!found) {
+                // Fallback Playwright interactive button selector
+                var item = page.locator(String.format("div[role='button']:has-text('%s'), button:has-text('%s')", contact, contact)).first();
+                if (item.count() > 0) {
+                    item.click();
+                    found = true;
+                }
             }
 
-            item.click();
+            if (!found) {
+                ensureChatsPanel(page);
+                return new ToolResultDTO(false, "No status update found for contact '" + contact + "' in WhatsApp Web (checked Recent and Viewed updates).",
+                    Map.of("contact", contact, "action", "view_contact_status"));
+            }
+
             page.waitForTimeout(4000);
 
             var closeBtn = page.locator("button[aria-label='Close'], button:has(span[data-icon='x-viewer']), span[data-icon='x-viewer']").first();

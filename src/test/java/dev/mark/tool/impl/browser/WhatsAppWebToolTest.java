@@ -310,6 +310,8 @@ class WhatsAppWebToolTest {
 
     @Test
     void testViewContactStatus() {
+        when(page.evaluate(anyString(), any())).thenReturn("{\"found\":true}");
+
         ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
             "action", "view_contact_status",
             "contact", "Suryansh Infosys"
