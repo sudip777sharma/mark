@@ -398,10 +398,10 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
         if (StringUtils.hasText(request.systemPrompt())) {
             messages.add(Map.of("role", "system", "content", request.systemPrompt()));
         }
+        messages.addAll(request.history().stream().map(this::toOpenAiMessage).toList());
         if (StringUtils.hasText(request.userPrompt())) {
             messages.add(Map.of("role", "user", "content", request.userPrompt()));
         }
-        messages.addAll(request.history().stream().map(this::toOpenAiMessage).toList());
         body.put("messages", messages);
 
         if (!request.tools().isEmpty()) {

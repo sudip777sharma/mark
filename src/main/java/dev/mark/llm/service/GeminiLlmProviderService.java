@@ -75,10 +75,6 @@ public class GeminiLlmProviderService implements LlmProviderService {
         try {
             List<Content> contents = new ArrayList<>();
 
-            // Add current user prompt if not empty (this should come before history)
-            if (request.userPrompt() != null && !request.userPrompt().isBlank()) {
-                contents.add(Content.builder().role("user").parts(List.of(Part.builder().text(request.userPrompt()).build())).build());
-            }
 
             // Map history
             List<Part> pendingToolParts = new ArrayList<>();
@@ -95,6 +91,11 @@ public class GeminiLlmProviderService implements LlmProviderService {
             }
             if (!pendingToolParts.isEmpty()) {
                 contents.add(Content.builder().role("user").parts(pendingToolParts).build());
+            }
+
+            // Append current user prompt at the end of the context
+            if (request.userPrompt() != null && !request.userPrompt().isBlank()) {
+                contents.add(Content.builder().role("user").parts(List.of(Part.builder().text(request.userPrompt()).build())).build());
             }
 
             // Map Tools

@@ -249,19 +249,20 @@ public class AgentOrchestratorService {
         }
 
         int stepNumber = state.steps().size() + 1;
-        log.info(">>> [ORCHESTRATOR:STEP_START] taskId={} step={}/{}", state.taskId(), stepNumber,
-                userPreferenceService.getInt("agent.maxSteps", properties.maxSteps()));
+        int activePlanStep = state.currentPlanIndex() + 1;
+        log.info(">>> [ORCHESTRATOR:STEP_START] taskId={} step={}/{} activePlanStep={}", state.taskId(), stepNumber,
+                userPreferenceService.getInt("agent.maxSteps", properties.maxSteps()), activePlanStep);
 
         AgentWorldStateModel currentWorldState = environmentObserver.observe();
         AgentWorldStateDeltaModel stateDelta = currentWorldState.compareTo(state.latestWorldState());
         state.updateWorldState(currentWorldState);
 
         String systemPrompt = promptBuilder.systemPromptForExecution(state.plan(), currentWorldState,
-                deltaService.formatWorldStateDelta(stateDelta), stepNumber);
+                deltaService.formatWorldStateDelta(stateDelta), activePlanStep);
 
         List<LlmMessageDTO> context = buildContext(state);
-        String userPrompt = (state.plan() != null && stepNumber <= state.plan().size())
-                ? "Execute Plan Step " + stepNumber + ": " + state.plan().get(stepNumber - 1)
+        String userPrompt = (state.plan() != null && activePlanStep <= state.plan().size())
+                ? "Execute Plan Step " + activePlanStep + ": " + state.plan().get(activePlanStep - 1)
                 : "Continue execution.";
         LlmRequestDTO request = new LlmRequestDTO(
                 state.taskId(),
@@ -358,6 +359,10 @@ public class AgentOrchestratorService {
                     state.addStep(new AgentStepModel(stepNumber, response.content(), toolCall.name(), argsJson,
                             outcome + ": " + details, response.provider(), java.time.Instant.now()));
 
+                    if (toolResult.successful() && !"task_complete".equals(toolCall.name()) && !"ask_user".equals(toolCall.name())) {
+                        state.advancePlanIndex();
+                    }
+
                     if ("task_complete".equals(toolCall.name()) && toolResult.successful()) {
                         String summaryStr = toolCall.arguments().get("summary") instanceof String s ? s.trim().toLowerCase() : "";
                         if (summaryStr.contains("no task completed") || summaryStr.contains("not completed yet") || summaryStr.contains("nothing completed")) {
@@ -376,7 +381,7 @@ public class AgentOrchestratorService {
                     }
 
                     if ("ask_user".equals(toolCall.name())) {
-                        String question = toolCall.arguments().get("question") instanceof String q ? q : "MARK requires your guidance to proceed.";
+                        String question = dev.mark.tool.impl.system.AskUserTool.extractQuestion(toolCall.arguments());
                         log.info("=== [ORCHESTRATOR:WAITING_USER_INPUT] taskId={} question='{}'", state.taskId(), question);
                         state.setStatus("NEEDS_INPUT");
                         setAction(state, "Waiting for user input: " + question);

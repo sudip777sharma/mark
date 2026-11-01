@@ -93,6 +93,22 @@ public final class AgentStateModel {
         this.plan = new ArrayList<>(plan);
     }
 
+    private int currentPlanIndex = 0;
+
+    public int currentPlanIndex() {
+        return currentPlanIndex;
+    }
+
+    public void advancePlanIndex() {
+        if (plan != null && currentPlanIndex < plan.size()) {
+            this.currentPlanIndex++;
+        }
+    }
+
+    public void setCurrentPlanIndex(int index) {
+        this.currentPlanIndex = Math.max(0, index);
+    }
+
     public String finalAnswer() { return finalAnswer; }
     public String currentAction() { return currentAction; }
     public void setCurrentAction(String currentAction) { this.currentAction = currentAction; }

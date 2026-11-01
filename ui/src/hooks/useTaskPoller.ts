@@ -62,11 +62,21 @@ export function useTaskPoller() {
       }).catch((e) => console.warn('Failed to load LLM logs:', e));
     };
 
+    if (activeTask.status === 'NEEDS_INPUT') {
+      setIsStreaming(false);
+      loadPersistedThoughts(taskId);
+      setWaitingUserInput({
+        taskId,
+        prompt: activeTask.currentAction || 'MARK requires your guidance to proceed.',
+      });
+    }
+
     const isRunning = activeTask.status === 'CREATED' || 
                       activeTask.status === 'PLANNING' || 
                       activeTask.status === 'EXECUTING' || 
                       activeTask.status === 'QUOTA_EXHAUSTED' || 
-                      activeTask.status === 'COOLDOWN';
+                      activeTask.status === 'COOLDOWN' ||
+                      activeTask.status === 'NEEDS_INPUT';
     if (!isRunning) {
       setIsStreaming(false);
       loadPersistedThoughts(taskId);
@@ -124,10 +134,11 @@ export function useTaskPoller() {
               payload: step,
             });
 
-            if (step.toolName && step.toolName.toLowerCase().includes('askuser')) {
+            const toolLower = (step.toolName || '').toLowerCase().replace(/_/g, '');
+            if (toolLower.includes('askuser')) {
               setWaitingUserInput({
                 taskId,
-                prompt: step.description || 'MARK requires your clarification to proceed.',
+                prompt: step.description || freshTask.currentAction || 'MARK requires your guidance to proceed.',
               });
               speechService.speak('MARK requires your guidance to proceed.');
             }
@@ -180,7 +191,19 @@ export function useTaskPoller() {
           seenStepsCountRef.current = currentSteps.length;
         }
 
-        if (freshTask.status === 'COMPLETED') {
+        if (freshTask.status === 'NEEDS_INPUT') {
+          setActiveTask(freshTask);
+          setIsStreaming(false);
+          loadPersistedThoughts(taskId);
+          setWaitingUserInput({
+            taskId,
+            prompt: freshTask.currentAction || 'MARK requires your guidance to proceed.',
+          });
+          speechService.speak('MARK requires your guidance to proceed.');
+        } else if (freshTask.status === 'EXECUTING') {
+          setActiveTask(freshTask);
+          setWaitingUserInput(null);
+        } else if (freshTask.status === 'COMPLETED') {
           setActiveTask(freshTask);
           setIsStreaming(false);
           loadPersistedThoughts(taskId);

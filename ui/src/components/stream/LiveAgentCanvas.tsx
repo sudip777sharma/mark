@@ -1,5 +1,6 @@
 ﻿import React, { useEffect, useRef } from 'react';
 import { useAgentStore } from '../../store/agentStore';
+import { taskApi } from '../../api/taskClient';
 import { ToolCallCard } from './ToolCallCard';
 import {
   Brain,
@@ -10,6 +11,9 @@ import {
   Sparkles,
   Layers,
   Zap,
+  AlertTriangle,
+  Send,
+  Check,
 } from 'lucide-react';
 
 const AnimatedEllipsis: React.FC = () => {
@@ -30,6 +34,55 @@ export const LiveAgentCanvas: React.FC = () => {
   const activePlan = useAgentStore((s) => s.activePlan);
   const isStreaming = useAgentStore((s) => s.isStreaming);
   const llmThoughtStream = useAgentStore((s) => s.llmThoughtStream);
+  const waitingUserInput = useAgentStore((s) => s.waitingUserInput);
+  const setWaitingUserInput = useAgentStore((s) => s.setWaitingUserInput);
+  const addStreamLog = useAgentStore((s) => s.addStreamLog);
+
+  const [humanReplyText, setHumanReplyText] = React.useState('');
+  const [isSubmittingReply, setIsSubmittingReply] = React.useState(false);
+
+  const handleSendHumanReply = async () => {
+    const tId = activeTask?.taskId || activeTask?.id || waitingUserInput?.taskId;
+    if (!tId || !humanReplyText.trim() || isSubmittingReply) return;
+    setIsSubmittingReply(true);
+    try {
+      await taskApi.replyToTask(tId, humanReplyText.trim());
+      addStreamLog({
+        id: Math.random().toString(),
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'user:replied',
+        title: 'User Provided Clarification',
+        detail: humanReplyText.trim(),
+      });
+      setWaitingUserInput(null);
+      setHumanReplyText('');
+    } catch (err) {
+      console.error('Failed to submit reply:', err);
+    } finally {
+      setIsSubmittingReply(false);
+    }
+  };
+
+  const handleApproveHumanAction = async () => {
+    const tId = activeTask?.taskId || activeTask?.id || waitingUserInput?.taskId;
+    if (!tId || isSubmittingReply) return;
+    setIsSubmittingReply(true);
+    try {
+      await taskApi.approveTask(tId);
+      addStreamLog({
+        id: Math.random().toString(),
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'user:approved',
+        title: 'Action Approved by User',
+        detail: 'User granted authorization to proceed.',
+      });
+      setWaitingUserInput(null);
+    } catch (err) {
+      console.error('Failed to approve:', err);
+    } finally {
+      setIsSubmittingReply(false);
+    }
+  };
   
   const [expandAllSignal, setExpandAllSignal] = React.useState(0);
   const [collapseAllSignal, setCollapseAllSignal] = React.useState(0);
@@ -382,6 +435,91 @@ export const LiveAgentCanvas: React.FC = () => {
             </div>
           );
         })}
+
+        {(waitingUserInput || activeTask?.status === 'NEEDS_INPUT') && (
+          <div
+            className="glass-panel"
+            style={{
+              margin: '12px 0',
+              padding: '16px 18px',
+              border: '1px solid var(--accent-amber)',
+              borderRadius: '8px',
+              background: 'rgba(245, 158, 11, 0.08)',
+              boxShadow: '0 0 20px rgba(245, 158, 11, 0.15)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+              <AlertTriangle size={18} color="var(--accent-amber)" />
+              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--accent-amber)' }}>
+                Action Requires Your Guidance (Human-in-the-Loop)
+              </span>
+            </div>
+            <p style={{ fontSize: '13px', color: 'var(--text-primary)', marginBottom: '12px', lineHeight: 1.5 }}>
+              {waitingUserInput?.prompt || activeTask?.currentAction || 'MARK requires clarification to proceed.'}
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <textarea
+                value={humanReplyText}
+                onChange={(e) => setHumanReplyText(e.target.value)}
+                placeholder="Type your response, clarification, or instruction here..."
+                rows={2}
+                style={{
+                  width: '100%',
+                  background: 'rgba(0, 0, 0, 0.4)',
+                  border: '1px solid var(--border)',
+                  borderRadius: '6px',
+                  padding: '8px 12px',
+                  color: 'var(--text-primary)',
+                  fontSize: '13px',
+                  resize: 'none',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    handleSendHumanReply();
+                  }
+                }}
+              />
+              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                <button
+                  onClick={handleApproveHumanAction}
+                  disabled={isSubmittingReply}
+                  className="btn-secondary"
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <Check size={14} />
+                  <span>Approve & Continue</span>
+                </button>
+                <button
+                  onClick={handleSendHumanReply}
+                  disabled={!humanReplyText.trim() || isSubmittingReply}
+                  className="btn-primary"
+                  style={{
+                    padding: '6px 14px',
+                    fontSize: '12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    cursor: humanReplyText.trim() ? 'pointer' : 'not-allowed',
+                    opacity: humanReplyText.trim() ? 1 : 0.6
+                  }}
+                >
+                  <Send size={14} />
+                  <span>Send Reply</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {llmThoughtStream && (
           <div style={{

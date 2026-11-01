@@ -1,4 +1,4 @@
-export type TaskStatus = 'CREATED' | 'PLANNING' | 'EXECUTING' | 'WAITING_USER' | 'COMPLETED' | 'FAILED' | 'COOLDOWN' | 'QUOTA_EXHAUSTED';
+export type TaskStatus = 'CREATED' | 'PLANNING' | 'EXECUTING' | 'VERIFYING' | 'WAITING_USER' | 'NEEDS_INPUT' | 'COMPLETED' | 'FAILED' | 'COOLDOWN' | 'QUOTA_EXHAUSTED';
 
 export interface AgentStep {
   number?: number;
