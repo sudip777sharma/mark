@@ -606,7 +606,7 @@ public class WhatsAppWebTool implements Tool {
             if (statusHeading.count() > 0 && statusHeading.isVisible()) {
                 return true;
             }
-            var statusBtn = page.locator("button[aria-label='Status'], button:has(span[data-icon='status-v3']), button:has(span[data-icon='status-refreshed']), button:has(span[data-icon='status-outline'])").first();
+            var statusBtn = page.locator("button[aria-label='Status'], button:has(span[data-icon='status-v3']), button:has(span[data-icon='status-refreshed']), button:has(span[data-icon='status-outline']), button:has-text('Status')").first();
             if (statusBtn.count() > 0) {
                 statusBtn.click();
                 page.waitForTimeout(800);
@@ -620,7 +620,7 @@ public class WhatsAppWebTool implements Tool {
 
     private void ensureChatsPanel(Page page) {
         try {
-            var chatsBtn = page.locator("button[aria-label='Chats'], button:has(span[data-icon='chats-outline']), button:has(span[data-icon='chat'])").first();
+            var chatsBtn = page.locator("button[aria-label='Chats'], button:has(span[data-icon='chats-outline']), button:has(span[data-icon='chat']), button:has-text('Chats')").first();
             if (chatsBtn.count() > 0) {
                 chatsBtn.click();
                 page.waitForTimeout(600);
@@ -678,8 +678,15 @@ public class WhatsAppWebTool implements Tool {
                         }
                     }
 
-                    const timeEl = row.querySelector('div:has-text("Today"), div:has-text("Yesterday"), div:has-text("ago"), span.x1f6kntn, div.x1f6kntn');
-                    const time = timeEl ? timeEl.innerText.trim() : '';
+                    let time = '';
+                    const textElements = row.querySelectorAll('span, div');
+                    for (const el of textElements) {
+                        const t = (el.innerText || '').trim();
+                        if (t.includes('Today') || t.includes('Yesterday') || t.includes('ago') || t.includes(':')) {
+                            time = t;
+                            break;
+                        }
+                    }
 
                     if (!results.some(r => r.contact.toLowerCase() === name.toLowerCase())) {
                         results.push({ contact: name, timestamp: time, unseen: unseen });
@@ -722,13 +729,18 @@ public class WhatsAppWebTool implements Tool {
 
         String jsMyStatus = """
             () => {
-                const myStatusRow = document.querySelector('div[role="button"]:has-text("My status"), div:has-text("My status")');
+                const allElements = Array.from(document.querySelectorAll('button, div[role="button"], div[data-testid="status-item"]'));
+                const myStatusRow = allElements.find(el => {
+                    const txt = (el.innerText || '').trim();
+                    return txt.startsWith('My status') || txt.includes('My status');
+                });
+
                 if (!myStatusRow) {
                     return JSON.stringify({ hasActiveStatus: false, text: "My status section not found", viewCount: 0 });
                 }
 
                 const text = myStatusRow.innerText || '';
-                if (text.includes("Tap to add status update") || text.includes("No updates") || text.includes("Add to my status")) {
+                if (text.includes("Click to add status update") || text.includes("Tap to add status update") || text.includes("No updates") || text.includes("Add to my status")) {
                     return JSON.stringify({ hasActiveStatus: false, text: "No active status update posted.", viewCount: 0 });
                 }
 
@@ -737,15 +749,22 @@ public class WhatsAppWebTool implements Tool {
                 if (viewMatch) {
                     viewCount = parseInt(viewMatch[1]);
                 } else {
-                    const icon = myStatusRow.querySelector('span[data-icon="view-status"], svg:has(path[d*="eye"])');
-                    if (icon && icon.parentElement) {
-                        const m = icon.parentElement.innerText.match(/(\\d+)/);
-                        if (m) viewCount = parseInt(m[1]);
+                    const eyeIcon = myStatusRow.querySelector('span[data-icon="view-status"], svg');
+                    if (eyeIcon && eyeIcon.parentElement) {
+                        const countText = eyeIcon.parentElement.innerText || '';
+                        const digitMatch = countText.match(/(\\d+)/);
+                        if (digitMatch) viewCount = parseInt(digitMatch[1]);
                     }
                 }
 
-                const timeMatch = text.match(/(Today[^\n]*|Yesterday[^\n]*|\\d+:\\d+\\s*(am|pm)|Just now|[^\n]*ago)/i);
-                const time = timeMatch ? timeMatch[0].trim() : "Active";
+                let time = "Active";
+                const lines = text.split('\\n').map(l => l.trim()).filter(l => l && !l.toLowerCase().includes('my status'));
+                for (const line of lines) {
+                    if (line.includes('Today') || line.includes('Yesterday') || line.includes(':') || line.includes('ago') || line.includes('Just now')) {
+                        time = line;
+                        break;
+                    }
+                }
 
                 return JSON.stringify({ hasActiveStatus: true, timestamp: time, viewCount: viewCount, raw: text });
             }
