@@ -38,7 +38,9 @@ class ScreenRecordingToolTest {
         assertTrue(props.containsKey("fps"));
         assertTrue(props.containsKey("include_audio"));
         assertTrue(props.containsKey("audio_device"));
+        assertTrue(props.containsKey("open_on_complete"));
         assertTrue(props.containsKey("output_path"));
+        assertTrue(props.containsKey("file_path"));
     }
 
     @Test
@@ -86,5 +88,15 @@ class ScreenRecordingToolTest {
         assertFalse(result.successful());
         assertEquals("IDLE", result.metadata().get("status"));
         assertTrue(result.observation().contains("No screen recording is currently active"));
+    }
+
+    @Test
+    void handleOpenFolderShouldSucceedWithFallback() {
+        ToolRequestDTO request = new ToolRequestDTO(taskId, tool.name(), Map.of("action", "open_folder"));
+        ToolResultDTO result = tool.execute(request);
+
+        assertTrue(result.successful());
+        assertEquals("OPENED", result.metadata().get("status"));
+        assertTrue(result.observation().contains("Successfully opened File Explorer"));
     }
 }

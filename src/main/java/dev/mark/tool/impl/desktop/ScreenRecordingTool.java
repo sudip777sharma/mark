@@ -42,6 +42,7 @@ public class ScreenRecordingTool implements Tool {
     private Path activeLogPath;
     private Instant recordingStartTime;
     private int recordingMaxDurationSeconds;
+    private boolean activeOpenOnComplete = false;
 
     @Override
     public String name() {
@@ -53,11 +54,14 @@ public class ScreenRecordingTool implements Tool {
         return "Record the Windows desktop screen and microphone audio into an MP4 video file. "
              + "Actions: 'start_recording' (begins background screen & audio recording), "
              + "'stop_recording' (stops active recording and returns the saved .mp4 file path), "
-             + "'status' (checks if a recording is currently in progress). "
+             + "'status' (checks if a recording is currently in progress), "
+             + "'open_folder' (opens Windows File Explorer with the saved video file highlighted). "
              + "Parameters: 'duration_seconds' (optional max duration in seconds, default 30, max 300), "
              + "'fps' (optional framerate, default 15), 'include_audio' (boolean, default true), "
              + "'audio_device' (optional DirectShow audio device name, auto-detected by default), "
-             + "'output_path' (optional destination file path, defaults to mark-workspace/recordings/screen_record_<timestamp>.mp4).";
+             + "'open_on_complete' (boolean, default false - automatically opens File Explorer with the file selected when recording finishes), "
+             + "'output_path' (optional destination file path, defaults to mark-workspace/recordings/screen_record_<timestamp>.mp4), "
+             + "'file_path' (optional path to highlight in File Explorer for 'open_folder' action).";
     }
 
     @Override
@@ -67,7 +71,7 @@ public class ScreenRecordingTool implements Tool {
                 "properties", Map.of(
                         "action", Map.of(
                                 "type", "string",
-                                "description", "One of: start_recording, stop_recording, status"),
+                                "description", "One of: start_recording, stop_recording, status, open_folder"),
                         "duration_seconds", Map.of(
                                 "type", "integer",
                                 "description", "Maximum recording duration in seconds (default 30, max 300)"),
@@ -80,9 +84,15 @@ public class ScreenRecordingTool implements Tool {
                         "audio_device", Map.of(
                                 "type", "string",
                                 "description", "Optional DirectShow audio device name (auto-detected if omitted)"),
+                        "open_on_complete", Map.of(
+                                "type", "boolean",
+                                "description", "Whether to automatically open the saved file in Windows File Explorer when recording finishes (default false)"),
                         "output_path", Map.of(
                                 "type", "string",
-                                "description", "Optional destination .mp4 file path (e.g. 'mark-workspace/recordings/demo.mp4')")),
+                                "description", "Optional destination .mp4 file path (e.g. 'mark-workspace/recordings/demo.mp4')"),
+                        "file_path", Map.of(
+                                "type", "string",
+                                "description", "Optional file or folder path to open in Windows File Explorer (used with 'open_folder')")),
                 "required", List.of("action"));
     }
 
@@ -97,7 +107,8 @@ public class ScreenRecordingTool implements Tool {
             case "start_recording" -> handleStartRecording(request);
             case "stop_recording" -> handleStopRecording(request);
             case "status" -> handleStatus(request);
-            default -> new ToolResultDTO(false, "Unknown screen_recorder action: " + action + ". Allowed: start_recording, stop_recording, status", Map.of());
+            case "open_folder" -> handleOpenFolder(request);
+            default -> new ToolResultDTO(false, "Unknown screen_recorder action: " + action + ". Allowed: start_recording, stop_recording, status, open_folder", Map.of());
         };
     }
 
@@ -138,6 +149,17 @@ public class ScreenRecordingTool implements Tool {
                 includeAudio = Boolean.parseBoolean(aObj.toString());
             }
         }
+
+        boolean openOnComplete = false;
+        if (request.arguments().containsKey("open_on_complete")) {
+            Object oObj = request.arguments().get("open_on_complete");
+            if (oObj instanceof Boolean b) {
+                openOnComplete = b;
+            } else if (oObj != null) {
+                openOnComplete = Boolean.parseBoolean(oObj.toString());
+            }
+        }
+        this.activeOpenOnComplete = openOnComplete;
 
         String audioDevice = (String) request.arguments().get("audio_device");
 
@@ -212,11 +234,24 @@ public class ScreenRecordingTool implements Tool {
     }
 
     private ToolResultDTO handleStopRecording(ToolRequestDTO request) {
+        boolean openOnComplete = this.activeOpenOnComplete;
+        if (request.arguments().containsKey("open_on_complete")) {
+            Object oObj = request.arguments().get("open_on_complete");
+            if (oObj instanceof Boolean b) {
+                openOnComplete = b;
+            } else if (oObj != null) {
+                openOnComplete = Boolean.parseBoolean(oObj.toString());
+            }
+        }
+
         if (!isRecording.get() && (activeProcess == null || !activeProcess.isAlive())) {
             if (activeOutputPath != null && Files.exists(activeOutputPath)) {
                 try {
                     long size = Files.size(activeOutputPath);
                     if (size > 1024) {
+                        if (openOnComplete) {
+                            launchFileExplorer(activeOutputPath);
+                        }
                         return new ToolResultDTO(true, "Screen recording is completed. Video saved to: " + activeOutputPath,
                                 Map.of("action", "stop_recording", "status", "STOPPED", "file_path", activeOutputPath.toString(), "size_bytes", size));
                     }
@@ -251,6 +286,9 @@ public class ScreenRecordingTool implements Tool {
                 long sizeBytes = Files.size(activeOutputPath);
                 log.info("Screen recording stopped successfully. File: {}, Size: {} bytes, Duration: {}s", activeOutputPath, sizeBytes, elapsed);
                 cleanupTempFiles();
+                if (openOnComplete) {
+                    launchFileExplorer(activeOutputPath);
+                }
                 return new ToolResultDTO(true, "Screen recording stopped successfully. Saved " + elapsed + "s video ("
                         + sizeBytes + " bytes) to: " + activeOutputPath,
                         Map.of(
@@ -289,6 +327,44 @@ public class ScreenRecordingTool implements Tool {
                         "elapsed_seconds", elapsed,
                         "max_duration_seconds", recordingMaxDurationSeconds
                 ));
+    }
+
+    private ToolResultDTO handleOpenFolder(ToolRequestDTO request) {
+        Path target = activeOutputPath;
+        if (request.arguments().containsKey("file_path")) {
+            String fp = (String) request.arguments().get("file_path");
+            if (fp != null && !fp.isBlank()) {
+                target = resolveOutputPath(fp);
+            }
+        }
+        if (target == null || !Files.exists(target)) {
+            target = Paths.get("mark-workspace", "recordings");
+        }
+        try {
+            if (!Files.exists(target)) {
+                Files.createDirectories(target);
+            }
+            launchFileExplorer(target);
+            return new ToolResultDTO(true, "Successfully opened File Explorer at: " + target.toAbsolutePath(),
+                    Map.of("action", "open_folder", "status", "OPENED", "path", target.toAbsolutePath().toString()));
+        } catch (Exception e) {
+            log.error("Failed to open File Explorer for target: {}", target, e);
+            return new ToolResultDTO(false, "Failed to open File Explorer: " + e.getMessage(), Map.of());
+        }
+    }
+
+    private void launchFileExplorer(Path target) {
+        if (target == null) return;
+        try {
+            if (Files.isRegularFile(target)) {
+                new ProcessBuilder("explorer.exe", "/select,", target.toAbsolutePath().toString()).start();
+            } else {
+                new ProcessBuilder("explorer.exe", target.toAbsolutePath().toString()).start();
+            }
+            log.info("Launched Windows File Explorer for: {}", target);
+        } catch (Exception e) {
+            log.warn("Could not launch File Explorer for: {}", target, e);
+        }
     }
 
     private Path resolveOutputPath(String outputPathStr) {

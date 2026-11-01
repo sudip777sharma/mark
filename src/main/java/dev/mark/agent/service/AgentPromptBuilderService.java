@@ -238,7 +238,7 @@ public class AgentPromptBuilderService {
         sb.append("\nPHASE 1: DOMAIN CATEGORIZATION & TOOL SELECTION\n");
         sb.append("- PREFER HIGH-LEVEL SPECIALIZED TOOLS: Whenever a specialized domain tool exists, ALWAYS plan around that tool rather than generic GUI/browser clicks.\n");
         sb.append("  * For WhatsApp tasks: Use 'whatsapp_web_automation' actions ('open_session', 'read_chat', 'verify_message', 'send_message', 'list_unread_chats', 'post_status', 'get_my_status', 'list_unseen_statuses', 'view_contact_status', 'start_audio_call', 'start_video_call') instead of manual browser clicks.\n");
-        sb.append("  * For Screen & Audio Recording: Use 'screen_recorder' actions ('start_recording', 'stop_recording', 'status') to capture desktop video and microphone audio into an MP4 video file.\n");
+        sb.append("  * For Screen & Audio Recording: Use 'screen_recorder' actions ('start_recording', 'stop_recording', 'status', 'open_folder') to capture desktop video and microphone audio. Always call 'stop_recording' before opening, dispatching, or verifying the recorded file. If the user asks to see or open where the file was saved, set 'open_on_complete: true' or call action 'open_folder'.\n");
         sb.append("  * For Code/File tasks: Prefer 'execute_command' and CLI tools over manual GUI clicks.\n");
         sb.append("  * For User Clarification & Guidance: If the goal is ambiguous or required paths/files are missing, use 'ask_user' to pause and ask the user.\n");
         sb.append("  * For generic GUI tasks: If no high-level tool exists, plan to use 'inspect_ui' and 'desktop_automation'.\n\n");
@@ -296,6 +296,8 @@ public class AgentPromptBuilderService {
         sb.append("- Do not claim success before tool results provide evidence.\n");
         sb.append("- HUMAN CLARIFICATION: If you need clarification from the user or cannot locate a required file or directory, NEVER return raw text asking questions as completion. You MUST call the 'ask_user' tool with your question. Calling 'ask_user' pauses execution and opens an interactive prompt for the user.\n");
         sb.append("- If you perform a 'desktop_automation' action that opens an application or triggers a slow UI update, you MUST use the 'delay' action to wait before taking the next step.\n");
+        sb.append("- WINDOWS FILE/FOLDER LAUNCH: When asked to open a folder or show a file in File Explorer, use 'screen_recorder' action 'open_folder' or 'explorer.exe /select,\"<file_path>\"'. NEVER use 'start \"<path>\"' because cmd.exe treats the first quoted string as a window title and will not open the file or folder.\n");
+        sb.append("- SCREEN RECORDING COMPLETION: Always call 'stop_recording' on 'screen_recorder' before opening, moving, or using the recorded video file so that FFmpeg finishes writing and muxing.\n");
         sb.append("- If inspect_ui fails or returns insufficient data, use 'screenshot' as a fallback to capture what is on screen.\n");
 
         if (plan != null && !plan.isEmpty()) {
