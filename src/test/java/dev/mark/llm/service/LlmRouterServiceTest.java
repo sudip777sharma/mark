@@ -2,6 +2,7 @@ package dev.mark.llm.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.mark.llm.dto.LlmRequestDTO;
+import dev.mark.llm.dto.LlmResponseDTO;
 import dev.mark.llm.entity.LlmProviderConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -48,8 +49,6 @@ class LlmRouterServiceTest {
         when(llmSettingsService.getConfig(1L)).thenReturn(Optional.of(config));
         
         // Act
-        // Because geminiProvider is a mock, calling complete on it returns null by default.
-        // We just want to verify geminiProvider was called.
         routerService.complete(request);
 
         // Assert
@@ -74,11 +73,9 @@ class LlmRouterServiceTest {
         
         RestClient.RequestBodyUriSpec uriSpec = mock(RestClient.RequestBodyUriSpec.class);
         lenient().when(mockRestClient.post()).thenReturn(uriSpec);
-        lenient().when(uriSpec.contentType(any())).thenReturn(mock(RestClient.RequestBodySpec.class)); // Just for setup, it will throw NPE if deeper methods are called in complete(), but we expect the LlmProviderException on error.
+        lenient().when(uriSpec.contentType(any())).thenReturn(mock(RestClient.RequestBodySpec.class));
 
         // Act
-        // The OpenAiCompatibleProviderService will attempt to make a request and likely fail because of partial mocks.
-        // But we can assert that it did NOT call gemini, and it fetched the next api key from settings.
         try {
             routerService.complete(request);
         } catch (Exception e) {
@@ -88,5 +85,39 @@ class LlmRouterServiceTest {
         // Assert
         verify(geminiProvider, never()).complete(request);
         verify(llmSettingsService, times(1)).getNextApiKey(2L);
+    }
+
+    @Test
+    void testCascadesToFallbackProviderWhenPrimaryProviderFailsWith429() {
+        // Arrange
+        LlmRequestDTO request = new LlmRequestDTO(1L, "sys", "user", List.of(), List.of(), null);
+
+        LlmProviderConfig primaryConfig = new LlmProviderConfig("primary-cloud", "groq", "llama-3", "https://api.groq.com", false, List.of());
+        primaryConfig.setId(1L);
+
+        LlmProviderConfig fallbackConfig = new LlmProviderConfig("gemini-fallback", "gemini", "gemini-1.5-flash", "url", false, List.of());
+        fallbackConfig.setId(2L);
+
+        when(llmSettingsService.getConfig(1L)).thenReturn(Optional.of(primaryConfig));
+        when(llmSettingsService.getAvailableFallbackConfigs(1L)).thenReturn(List.of(fallbackConfig));
+        when(llmSettingsService.getApiKeysCount(1L)).thenReturn(1);
+        when(llmSettingsService.getNextApiKey(1L)).thenReturn("key-1");
+
+        RestClient mockRestClient = mock(RestClient.class);
+        lenient().when(restClientBuilder.baseUrl(anyString())).thenReturn(restClientBuilder);
+        lenient().when(restClientBuilder.defaultHeader(anyString(), anyString())).thenReturn(restClientBuilder);
+        lenient().when(restClientBuilder.build()).thenReturn(mockRestClient);
+        when(mockRestClient.post()).thenThrow(new dev.mark.llm.exception.LlmProviderException("HTTP 429 Rate limit / daily quota exceeded"));
+
+        LlmResponseDTO fallbackResponse = new LlmResponseDTO("Fallback success", "gemini-fallback", false, List.of());
+        when(geminiProvider.complete(request)).thenReturn(fallbackResponse);
+
+        // Act
+        LlmResponseDTO result = routerService.complete(request);
+
+        // Assert
+        assertNotNull(result);
+        assertEquals("Fallback success", result.content());
+        verify(geminiProvider, times(1)).complete(request);
     }
 }

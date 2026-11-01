@@ -1,18 +1,25 @@
 package dev.mark.llm.service;
 
 import dev.mark.llm.dto.*;
+import dev.mark.llm.entity.LlmProviderConfig;
 import dev.mark.llm.exception.LlmProviderException;
 import dev.mark.task.entity.LlmInteractionLogEntity;
 import dev.mark.task.repository.LlmInteractionLogRepository;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Component
 @Primary
 public class LlmRouterService implements LlmProviderService {
+
+    private static final Logger log = LoggerFactory.getLogger(LlmRouterService.class);
 
     private final GeminiLlmProviderService gemini;
     private final LlmSettingsService llmSettingsService;
@@ -38,46 +45,152 @@ public class LlmRouterService implements LlmProviderService {
     @Override
     public String name() {
         return llmSettingsService.getDefaultConfig()
-                .map(c -> c.getConfigName())
+                .map(LlmProviderConfig::getConfigName)
                 .orElse("gemini");
     }
 
     @Override
     public PlanResponseDTO plan(LlmRequestDTO request) {
-        PlanResponseDTO res = select(request).plan(request);
-        saveLog(request, String.valueOf(res.steps()));
-        return res;
+        LlmProviderConfig initialConfig = resolveInitialConfig(request);
+        List<LlmProviderConfig> configsToTry = new ArrayList<>();
+        if (initialConfig != null) {
+            configsToTry.add(initialConfig);
+        }
+        configsToTry.addAll(llmSettingsService.getAvailableFallbackConfigs(initialConfig != null ? initialConfig.getId() : null));
+
+        LlmProviderException lastException = null;
+        for (LlmProviderConfig config : configsToTry) {
+            int attempts = Math.max(1, llmSettingsService.getApiKeysCount(config.getId()));
+            for (int i = 0; i < attempts; i++) {
+                try {
+                    LlmProviderService provider = createProviderService(config);
+                    PlanResponseDTO res = provider.plan(request);
+                    saveLog(request, String.valueOf(res.steps()));
+                    return res;
+                } catch (LlmProviderException e) {
+                    lastException = e;
+                    log.warn("Provider '{}' plan attempt {}/{} failed: {}", config.getConfigName(), i + 1, attempts, e.getMessage());
+                    if (!isRetryableError(e)) {
+                        throw e;
+                    }
+                }
+            }
+            log.warn("Exhausted active keys for provider '{}' during planning. Cascading to next available provider...", config.getConfigName());
+        }
+
+        throw lastException != null ? lastException : new LlmProviderException("All configured LLM providers failed for planning");
     }
 
     @Override
     public PlanResponseDTO planStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
-        // We intercept the stream to capture the raw response because PlanResponseDTO drops the thinking
-        StringBuilder fullStream = new StringBuilder();
-        PlanResponseDTO res = select(request).planStream(request, chunk -> {
-            fullStream.append(chunk);
-            if (onChunk != null) onChunk.accept(chunk);
-        });
-        saveLog(request, fullStream.toString());
-        return res;
+        LlmProviderConfig initialConfig = resolveInitialConfig(request);
+        List<LlmProviderConfig> configsToTry = new ArrayList<>();
+        if (initialConfig != null) {
+            configsToTry.add(initialConfig);
+        }
+        configsToTry.addAll(llmSettingsService.getAvailableFallbackConfigs(initialConfig != null ? initialConfig.getId() : null));
+
+        LlmProviderException lastException = null;
+        for (LlmProviderConfig config : configsToTry) {
+            int attempts = Math.max(1, llmSettingsService.getApiKeysCount(config.getId()));
+            for (int i = 0; i < attempts; i++) {
+                try {
+                    LlmProviderService provider = createProviderService(config);
+                    StringBuilder fullStream = new StringBuilder();
+                    PlanResponseDTO res = provider.planStream(request, chunk -> {
+                        fullStream.append(chunk);
+                        if (onChunk != null) onChunk.accept(chunk);
+                    });
+                    saveLog(request, fullStream.toString());
+                    return res;
+                } catch (LlmProviderException e) {
+                    lastException = e;
+                    log.warn("Provider '{}' planStream attempt {}/{} failed: {}", config.getConfigName(), i + 1, attempts, e.getMessage());
+                    if (!isRetryableError(e)) {
+                        throw e;
+                    }
+                }
+            }
+            log.warn("Exhausted active keys for provider '{}' during planning. Cascading to next available provider...", config.getConfigName());
+        }
+
+        throw lastException != null ? lastException : new LlmProviderException("All configured LLM providers failed for planning");
     }
 
     @Override
     public LlmResponseDTO complete(LlmRequestDTO request) {
-        LlmResponseDTO res = select(request).complete(request);
-        saveLog(request, res != null ? res.content() : null);
-        return res;
+        LlmProviderConfig initialConfig = resolveInitialConfig(request);
+        List<LlmProviderConfig> configsToTry = new ArrayList<>();
+        if (initialConfig != null) {
+            configsToTry.add(initialConfig);
+        }
+        configsToTry.addAll(llmSettingsService.getAvailableFallbackConfigs(initialConfig != null ? initialConfig.getId() : null));
+
+        LlmProviderException lastException = null;
+        for (LlmProviderConfig config : configsToTry) {
+            int attempts = Math.max(1, llmSettingsService.getApiKeysCount(config.getId()));
+            for (int i = 0; i < attempts; i++) {
+                try {
+                    LlmProviderService provider = createProviderService(config);
+                    LlmResponseDTO res = provider.complete(request);
+                    saveLog(request, res != null ? res.content() : null);
+                    return res;
+                } catch (LlmProviderException e) {
+                    lastException = e;
+                    log.warn("Provider '{}' complete attempt {}/{} failed: {}", config.getConfigName(), i + 1, attempts, e.getMessage());
+                    if (!isRetryableError(e)) {
+                        throw e;
+                    }
+                }
+            }
+            log.warn("Exhausted active keys for provider '{}'. Cascading to next available provider...", config.getConfigName());
+        }
+
+        throw lastException != null ? lastException : new LlmProviderException("All configured LLM providers failed");
     }
 
     @Override
     public LlmResponseDTO completeStream(LlmRequestDTO request, java.util.function.Consumer<String> onChunk) {
-        // We intercept the stream to capture the exact raw response in case the provider mutates it
-        StringBuilder fullStream = new StringBuilder();
-        LlmResponseDTO res = select(request).completeStream(request, chunk -> {
-            fullStream.append(chunk);
-            if (onChunk != null) onChunk.accept(chunk);
-        });
-        saveLog(request, fullStream.toString());
-        return res;
+        LlmProviderConfig initialConfig = resolveInitialConfig(request);
+        List<LlmProviderConfig> configsToTry = new ArrayList<>();
+        if (initialConfig != null) {
+            configsToTry.add(initialConfig);
+        }
+        configsToTry.addAll(llmSettingsService.getAvailableFallbackConfigs(initialConfig != null ? initialConfig.getId() : null));
+
+        LlmProviderException lastException = null;
+        for (LlmProviderConfig config : configsToTry) {
+            int attempts = Math.max(1, llmSettingsService.getApiKeysCount(config.getId()));
+            for (int i = 0; i < attempts; i++) {
+                try {
+                    LlmProviderService provider = createProviderService(config);
+                    StringBuilder fullStream = new StringBuilder();
+                    LlmResponseDTO res = provider.completeStream(request, chunk -> {
+                        fullStream.append(chunk);
+                        if (onChunk != null) onChunk.accept(chunk);
+                    });
+                    saveLog(request, fullStream.toString());
+                    return res;
+                } catch (LlmProviderException e) {
+                    lastException = e;
+                    log.warn("Provider '{}' completeStream attempt {}/{} failed: {}", config.getConfigName(), i + 1, attempts, e.getMessage());
+                    if (!isRetryableError(e)) {
+                        throw e;
+                    }
+                }
+            }
+            log.warn("Exhausted active keys for provider '{}'. Cascading to next available provider...", config.getConfigName());
+        }
+
+        throw lastException != null ? lastException : new LlmProviderException("All configured LLM providers failed");
+    }
+
+    private boolean isRetryableError(LlmProviderException e) {
+        if (e == null || e.getMessage() == null) return false;
+        String m = e.getMessage().toLowerCase();
+        return m.contains("429") || m.contains("quota") || m.contains("rate") || m.contains("limit")
+                || m.contains("500") || m.contains("502") || m.contains("503") || m.contains("504")
+                || m.contains("timeout") || m.contains("connect") || m.contains("connection");
     }
 
     private void saveLog(LlmRequestDTO req, String rawResponse) {
@@ -128,19 +241,18 @@ public class LlmRouterService implements LlmProviderService {
         }
     }
 
-    private LlmProviderService select(LlmRequestDTO request) {
+    private LlmProviderConfig resolveInitialConfig(LlmRequestDTO request) {
         Long requested = request.configId();
-
-        dev.mark.llm.entity.LlmProviderConfig config;
-        
         if (requested == null) {
-            config = llmSettingsService.getDefaultConfig()
+            return llmSettingsService.getDefaultConfig()
                     .orElseThrow(() -> new LlmProviderException("No default LLM provider configured"));
         } else {
-            config = llmSettingsService.getConfig(requested)
+            return llmSettingsService.getConfig(requested)
                     .orElseThrow(() -> new LlmProviderException("Unknown LLM provider ID: " + requested));
         }
+    }
 
+    private LlmProviderService createProviderService(LlmProviderConfig config) {
         if ("GEMINI".equalsIgnoreCase(config.getProviderType())) {
             return gemini; 
         } else {

@@ -3,6 +3,9 @@ package dev.mark.llm.service;
 import dev.mark.llm.entity.LlmProviderConfig;
 import dev.mark.llm.entity.ApiKeyEntry;
 import dev.mark.llm.repository.LlmProviderConfigRepository;
+import jakarta.annotation.PostConstruct;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +16,8 @@ import java.util.Optional;
 @Service
 public class LlmSettingsService {
 
+    private static final Logger log = LoggerFactory.getLogger(LlmSettingsService.class);
+
     private final LlmProviderConfigRepository repository;
 
     @Autowired
@@ -20,12 +25,74 @@ public class LlmSettingsService {
         this.repository = repository;
     }
 
+    @PostConstruct
+    public void initDefaultProviders() {
+        try {
+            if (repository.findByConfigName("Ollama (Local)").isEmpty()) {
+                LlmProviderConfig localConfig = new LlmProviderConfig(
+                        "Ollama (Local)",
+                        "local",
+                        "qwen2.5:latest",
+                        "http://localhost:11434/v1",
+                        false,
+                        List.of(new ApiKeyEntry("local", "ollama", true))
+                );
+                localConfig.setConfigured(true);
+                repository.save(localConfig);
+                log.info("Initialized default Local Ollama provider: http://localhost:11434/v1 (model: qwen2.5:latest)");
+            }
+        } catch (Exception e) {
+            log.warn("Notice during Ollama default config initialization: {}", e.getMessage());
+        }
+    }
+
     public boolean hasDefaultConfig() {
-        return repository.findByIsDefaultTrue().isPresent();
+        return getDefaultConfig().isPresent();
     }
 
     public Optional<LlmProviderConfig> getDefaultConfig() {
-        return repository.findByIsDefaultTrue();
+        Optional<LlmProviderConfig> def = repository.findByIsDefaultTrue();
+        if (def.isPresent()) {
+            LlmProviderConfig c = def.get();
+            // If the designated default provider has all keys deactivated, auto-fallback to an active provider
+            if (!"local".equalsIgnoreCase(c.getProviderType()) && getApiKeysCount(c.getId()) == 0) {
+                for (LlmProviderConfig alt : repository.findAll()) {
+                    if (Boolean.TRUE.equals(alt.isConfigured())) {
+                        if ("local".equalsIgnoreCase(alt.getProviderType()) || getApiKeysCount(alt.getId()) > 0) {
+                            log.info("Primary default '{}' has no active keys; using active alternative '{}'", c.getConfigName(), alt.getConfigName());
+                            return Optional.of(alt);
+                        }
+                    }
+                }
+            }
+            return def;
+        }
+
+        // If no explicit default, pick first configured provider with active keys or local
+        for (LlmProviderConfig alt : repository.findAll()) {
+            if (Boolean.TRUE.equals(alt.isConfigured())) {
+                if ("local".equalsIgnoreCase(alt.getProviderType()) || getApiKeysCount(alt.getId()) > 0) {
+                    return Optional.of(alt);
+                }
+            }
+        }
+
+        return Optional.empty();
+    }
+
+    public List<LlmProviderConfig> getAvailableFallbackConfigs(Long currentConfigId) {
+        return repository.findAll().stream()
+                .filter(c -> Boolean.TRUE.equals(c.isConfigured()))
+                .filter(c -> currentConfigId == null || !currentConfigId.equals(c.getId()))
+                .filter(c -> "local".equalsIgnoreCase(c.getProviderType()) || getApiKeysCount(c.getId()) > 0)
+                .sorted((a, b) -> {
+                    boolean aLocal = "local".equalsIgnoreCase(a.getProviderType());
+                    boolean bLocal = "local".equalsIgnoreCase(b.getProviderType());
+                    if (aLocal && !bLocal) return 1;
+                    if (!aLocal && bLocal) return -1;
+                    return 0;
+                })
+                .toList();
     }
 
     public Optional<LlmProviderConfig> getConfig(Long id) {
@@ -43,6 +110,9 @@ public class LlmSettingsService {
         if (configId == null) return null;
         return repository.findById(configId)
                 .map(config -> {
+                    if ("local".equalsIgnoreCase(config.getProviderType())) {
+                        return "ollama";
+                    }
                     List<ApiKeyEntry> allKeys = config.getApiKeys();
                     if (allKeys == null || allKeys.isEmpty()) return null;
                     
@@ -64,6 +134,9 @@ public class LlmSettingsService {
         if (configId == null) return 0;
         return repository.findById(configId)
                 .map(config -> {
+                    if ("local".equalsIgnoreCase(config.getProviderType())) {
+                        return 1;
+                    }
                     if (config.getApiKeys() == null) return 0;
                     return (int) config.getApiKeys().stream()
                             .filter(k -> k.getIsActive() == null || k.getIsActive())

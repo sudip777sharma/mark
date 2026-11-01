@@ -163,12 +163,27 @@ public class WhatsAppWebTool implements Tool {
                     if (statusText == null || statusText.isBlank()) {
                         statusText = (String) arguments.get("caption");
                     }
+                    if (statusText == null || statusText.isBlank()) {
+                        statusText = (String) arguments.get("text");
+                    }
                     String filePath = (String) arguments.get("file_path");
                     if (filePath == null || filePath.isBlank()) {
                         filePath = (String) arguments.get("media_path");
                     }
                     if (filePath == null || filePath.isBlank()) {
                         filePath = (String) arguments.get("filePath");
+                    }
+                    if (filePath == null || filePath.isBlank()) {
+                        filePath = (String) arguments.get("path");
+                    }
+                    if (filePath == null || filePath.isBlank()) {
+                        filePath = (String) arguments.get("file");
+                    }
+                    if (filePath == null || filePath.isBlank()) {
+                        filePath = (String) arguments.get("video_path");
+                    }
+                    if (filePath == null || filePath.isBlank()) {
+                        filePath = (String) arguments.get("image_path");
                     }
                     return executePostStatus(page, statusText, filePath);
 
@@ -865,31 +880,48 @@ public class WhatsAppWebTool implements Tool {
     }
 
     private void postSingleMediaStatus(Page page, Path file, String caption) {
+        log.info("Posting single media status: {}", file.toAbsolutePath());
         var fileInput = page.locator("input[accept*='image'], input[accept*='video'], input[type='file']").first();
         if (fileInput.count() == 0) {
             var addBtn = page.locator("button[aria-label*='Add status' i], button:has(span[data-icon='status-add']), div[role='button']:has-text('Add status'), div[role='button']:has-text('My status')").first();
             if (addBtn.count() > 0) {
                 addBtn.click();
-                page.waitForTimeout(500);
+                page.waitForTimeout(600);
             }
         }
 
-        fileInput = page.locator("input[accept*='image'], input[accept*='video'], input[type='file']").first();
-        if (fileInput.count() > 0) {
-            fileInput.setInputFiles(file);
-        } else {
+        var photoOption = page.locator("button:has-text('Photos'), li:has-text('Photos'), div[role='button']:has-text('Photos'), span[data-icon='image'], span[data-icon='camera']").first();
+        if (photoOption.count() > 0) {
             final Path targetFile = file;
-            var fileChooser = page.waitForFileChooser(new Page.WaitForFileChooserOptions().setTimeout(4000), () -> {
-                var photoOption = page.locator("button:has-text('Photos'), li:has-text('Photos'), div[role='button']:has-text('Photos'), span[data-icon='image'], span[data-icon='camera']").first();
-                if (photoOption.count() > 0) {
+            try {
+                var fileChooser = page.waitForFileChooser(new Page.WaitForFileChooserOptions().setTimeout(5000), () -> {
                     photoOption.click();
+                });
+                fileChooser.setFiles(targetFile);
+            } catch (Exception ex) {
+                fileInput = page.locator("input[accept*='image'], input[accept*='video'], input[type='file']").first();
+                if (fileInput.count() > 0) {
+                    fileInput.setInputFiles(targetFile);
                 }
-            });
-            fileChooser.setFiles(targetFile);
+            }
+        } else {
+            fileInput = page.locator("input[accept*='image'], input[accept*='video'], input[type='file']").first();
+            if (fileInput.count() > 0) {
+                fileInput.setInputFiles(file);
+            } else {
+                final Path targetFile = file;
+                var fileChooser = page.waitForFileChooser(new Page.WaitForFileChooserOptions().setTimeout(5000), () -> {
+                    var fallbackBtn = page.locator("button[aria-label*='Add status' i], button:has(span[data-icon='status-add']), span[data-icon='status-add']").first();
+                    if (fallbackBtn.count() > 0) {
+                        fallbackBtn.click();
+                    }
+                });
+                fileChooser.setFiles(targetFile);
+            }
         }
 
         page.waitForSelector("button[aria-label='Send'], button:has(span[data-icon='send']), span[data-icon='send'], div[contenteditable='true']",
-            new Page.WaitForSelectorOptions().setTimeout(12000));
+            new Page.WaitForSelectorOptions().setTimeout(15000));
 
         if (caption != null && !caption.isBlank()) {
             var captionBox = page.locator("div[contenteditable='true'], div[role='textbox']").first();
@@ -906,7 +938,7 @@ public class WhatsAppWebTool implements Tool {
         } else {
             page.keyboard().press("Enter");
         }
-        page.waitForTimeout(2500);
+        page.waitForTimeout(3000);
     }
 
     private ToolResultDTO executePostStatus(Page page, String text, String rawFilePath) {
@@ -1013,7 +1045,12 @@ public class WhatsAppWebTool implements Tool {
 
                 if (pencilBtn.count() > 0) {
                     pencilBtn.click();
-                    page.waitForTimeout(1000);
+                    page.waitForTimeout(800);
+                    var textOption = page.locator("li:has-text('Text'), div[role='button']:has-text('Text'), span:has-text('Text')").first();
+                    if (textOption.count() > 0) {
+                        textOption.click();
+                        page.waitForTimeout(800);
+                    }
                 } else {
                     ensureChatsPanel(page);
                     return new ToolResultDTO(false, "Could not find WhatsApp Web Status creation button.", Map.of("action", "post_status"));

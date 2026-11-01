@@ -239,6 +239,13 @@ public class AgentPromptBuilderService {
         sb.append("- PREFER HIGH-LEVEL SPECIALIZED TOOLS: Whenever a specialized domain tool exists, ALWAYS plan around that tool rather than generic GUI/browser clicks.\n");
         sb.append("  * For WhatsApp tasks: Use 'whatsapp_web_automation' actions ('open_session', 'read_chat', 'verify_message', 'send_message', 'list_unread_chats', 'post_status', 'get_my_status', 'list_unseen_statuses', 'view_contact_status', 'start_audio_call', 'start_video_call') instead of manual browser clicks.\n");
         sb.append("  * For Screen & Audio Recording: Use 'screen_recorder' actions ('start_recording', 'stop_recording', 'status', 'open_folder') to capture desktop video and microphone audio. Always call 'stop_recording' before opening, dispatching, or verifying the recorded file. If the user asks to see or open where the file was saved, set 'open_on_complete: true' or call action 'open_folder'.\n");
+        sb.append("  * For Compound Workflows (e.g. Record screen while performing actions, then show file and post status):\n");
+        sb.append("    Plan in deterministic sequential order:\n");
+        sb.append("    1. Start screen recording via 'screen_recorder' ('action': 'start_recording', 'duration_seconds': <secs>, 'include_audio': true)\n");
+        sb.append("    2. Perform domain task (e.g., 'whatsapp_web_automation' post photo status updates)\n");
+        sb.append("    3. Stop screen recording via 'screen_recorder' ('action': 'stop_recording')\n");
+        sb.append("    4. Open the recorded video location in File Explorer via 'screen_recorder' ('action': 'open_folder')\n");
+        sb.append("    5. Post the recorded video to WhatsApp Web via 'whatsapp_web_automation' ('action': 'post_status', 'file_path': '<recorded_mp4>', 'message': '<caption>')\n");
         sb.append("  * For Code/File tasks: Prefer 'execute_command' and CLI tools over manual GUI clicks.\n");
         sb.append("  * For User Clarification & Guidance: If the goal is ambiguous or required paths/files are missing, use 'ask_user' to pause and ask the user.\n");
         sb.append("  * For generic GUI tasks: If no high-level tool exists, plan to use 'inspect_ui' and 'desktop_automation'.\n\n");
@@ -298,6 +305,7 @@ public class AgentPromptBuilderService {
         sb.append("- If you perform a 'desktop_automation' action that opens an application or triggers a slow UI update, you MUST use the 'delay' action to wait before taking the next step.\n");
         sb.append("- WINDOWS FILE/FOLDER LAUNCH: When asked to open a folder or show a file in File Explorer, use 'screen_recorder' action 'open_folder' or 'explorer.exe /select,\"<file_path>\"'. NEVER use 'start \"<path>\"' because cmd.exe treats the first quoted string as a window title and will not open the file or folder.\n");
         sb.append("- SCREEN RECORDING COMPLETION: Always call 'stop_recording' on 'screen_recorder' before opening, moving, or using the recorded video file so that FFmpeg finishes writing and muxing.\n");
+        sb.append("- WHATSAPP STATUS POSTING: When posting photo or video status, ALWAYS pass 'file_path' with the exact local path to the image/video file or image directory. For text status, pass 'message'.\n");
         sb.append("- If inspect_ui fails or returns insufficient data, use 'screenshot' as a fallback to capture what is on screen.\n");
 
         if (plan != null && !plan.isEmpty()) {
