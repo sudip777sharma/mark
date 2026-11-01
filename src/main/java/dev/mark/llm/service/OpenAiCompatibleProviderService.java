@@ -118,12 +118,21 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
                                             com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(data);
                                             com.fasterxml.jackson.databind.JsonNode deltaNode = node.path("choices").path(0).path("delta");
                                             
-                                            // 1. Accumulate Content
+                                            // 1. Accumulate Content & Reasoning
                                             com.fasterxml.jackson.databind.JsonNode contentNode = deltaNode.path("content");
                                             if (!contentNode.isMissingNode() && !contentNode.isNull()) {
                                                 String chunk = contentNode.asText();
                                                 sbContent.append(chunk);
                                                 onChunk.accept(chunk);
+                                            }
+                                            com.fasterxml.jackson.databind.JsonNode reasoningNode = deltaNode.path("reasoning_content");
+                                            if (reasoningNode.isMissingNode() || reasoningNode.isNull()) {
+                                                reasoningNode = deltaNode.path("reasoning");
+                                            }
+                                            if (!reasoningNode.isMissingNode() && !reasoningNode.isNull()) {
+                                                String rChunk = reasoningNode.asText();
+                                                sbContent.append(rChunk);
+                                                onChunk.accept(rChunk);
                                             }
                                             
                                             // 2. Accumulate Tool Calls
@@ -270,11 +279,21 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
                                         if ("[DONE]".equals(data)) break;
                                         try {
                                             com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(data);
-                                            com.fasterxml.jackson.databind.JsonNode contentNode = node.path("choices").path(0).path("delta").path("content");
+                                            com.fasterxml.jackson.databind.JsonNode deltaNode = node.path("choices").path(0).path("delta");
+                                            com.fasterxml.jackson.databind.JsonNode contentNode = deltaNode.path("content");
                                             if (!contentNode.isMissingNode() && !contentNode.isNull()) {
                                                 String chunk = contentNode.asText();
                                                 sb.append(chunk);
                                                 onChunk.accept(chunk);
+                                            }
+                                            com.fasterxml.jackson.databind.JsonNode reasoningNode = deltaNode.path("reasoning_content");
+                                            if (reasoningNode.isMissingNode() || reasoningNode.isNull()) {
+                                                reasoningNode = deltaNode.path("reasoning");
+                                            }
+                                            if (!reasoningNode.isMissingNode() && !reasoningNode.isNull()) {
+                                                String rChunk = reasoningNode.asText();
+                                                sb.append(rChunk);
+                                                onChunk.accept(rChunk);
                                             }
                                         } catch (Exception e) {
                                             // ignore parse errors for incomplete chunks

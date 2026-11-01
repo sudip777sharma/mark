@@ -383,59 +383,67 @@ export const LiveAgentCanvas: React.FC = () => {
           );
         })}
 
+        {llmThoughtStream && (
+          <div style={{
+            margin: '8px 0',
+            padding: '12px 14px',
+            background: 'rgba(0, 0, 0, 0.5)',
+            borderRadius: '6px',
+            border: '1px solid var(--border)',
+            color: 'var(--text-secondary)',
+            fontFamily: 'monospace',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            width: '100%',
+            fontSize: '11px',
+            maxHeight: '260px',
+            overflowY: 'auto',
+            boxSizing: 'border-box'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'var(--accent-cyan)' }}>
+                <Brain size={14} color="var(--accent-cyan)" />
+                <span>{isStreaming ? '🧠 LLM Thought (Live Streaming):' : '🧠 LLM Thought / Reasoning (Persisted):'}</span>
+              </div>
+              <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                {isStreaming ? 'Live' : 'Saved in DB'}
+              </span>
+            </div>
+            <div style={{ lineHeight: 1.5, color: 'var(--text-muted)' }}>
+              {llmThoughtStream}
+              {isStreaming && (
+                <span className="animate-pulse" style={{ color: 'var(--accent-cyan)', marginLeft: '4px' }}>■</span>
+              )}
+            </div>
+          </div>
+        )}
+
         {isStreaming && (
           <div
             style={{
               display: 'flex',
-              alignItems: 'flex-start',
+              alignItems: 'center',
               gap: '8px',
               padding: '10px 14px',
               color: 'var(--accent-cyan)',
               fontSize: '12px',
-              flexDirection: 'column',
               width: '100%',
               boxSizing: 'border-box'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Clock size={14} className="animate-spin" />
-              <span>
-                {activeTask?.currentAction ? (
-                  <span>
-                    {activeTask.currentAction.replace(/\.+$/, '')}
-                    <AnimatedEllipsis />
-                  </span>
-                ) : (
-                  <span>
-                    Autonomous agent executing next step<AnimatedEllipsis />
-                  </span>
-                )}
-              </span>
-            </div>
-
-            {llmThoughtStream && (
-              <div style={{
-                marginTop: '6px',
-                padding: '12px',
-                background: 'rgba(0,0,0,0.4)',
-                borderRadius: '6px',
-                border: '1px solid var(--border)',
-                color: 'var(--text-muted)',
-                fontFamily: 'monospace',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-all',
-                width: '100%',
-                fontSize: '11px',
-                maxHeight: '200px',
-                overflowY: 'auto'
-              }}>
-                <div style={{ marginBottom: '4px', fontWeight: 600, color: 'var(--accent-cyan)' }}>
-🧠 LLM Thought (Live):
-</div>
-{llmThoughtStream}
-                <span className="animate-pulse" style={{ color: 'var(--accent-cyan)', marginLeft: '2px' }}>â–</span>
-              </div>
-            )}
+            <Clock size={14} className="animate-spin" />
+            <span>
+              {activeTask?.currentAction ? (
+                <span>
+                  {activeTask.currentAction.replace(/\.+$/, '')}
+                  <AnimatedEllipsis />
+                </span>
+              ) : (
+                <span>
+                  Autonomous agent executing next step<AnimatedEllipsis />
+                </span>
+              )}
+            </span>
           </div>
         )}
         <div ref={bottomRef} />

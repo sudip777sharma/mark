@@ -40,6 +40,7 @@ interface AgentStoreState {
   setIsStreaming: (streaming: boolean) => void;
   llmThoughtStream: string;
   appendLlmThoughtChunk: (chunk: string) => void;
+  setLlmThoughtStream: (stream: string) => void;
   clearLlmThoughtStream: () => void;
   streamLogs: StreamLogItem[];
   setStreamLogs: (logs: StreamLogItem[]) => void;
@@ -98,6 +99,7 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   setIsStreaming: (isStreaming) => set({ isStreaming }),
   llmThoughtStream: '',
   appendLlmThoughtChunk: (chunk) => set((state) => ({ llmThoughtStream: state.llmThoughtStream + chunk })),
+  setLlmThoughtStream: (llmThoughtStream) => set({ llmThoughtStream }),
   clearLlmThoughtStream: () => set({ llmThoughtStream: '' }),
   streamLogs: [],
   setStreamLogs: (logs) => set({ streamLogs: logs }),

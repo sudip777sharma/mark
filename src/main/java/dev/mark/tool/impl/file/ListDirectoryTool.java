@@ -131,11 +131,11 @@ public class ListDirectoryTool implements Tool {
 
     private Path resolveDesktopPath(String pathStr) {
         String stripped = pathStr.replace('\\', '/');
-        if (stripped.startsWith("Desktop/")) {
+        if (stripped.toLowerCase().startsWith("desktop/")) {
             stripped = stripped.substring(8);
-        } else if (stripped.equals("Desktop")) {
+        } else if (stripped.equalsIgnoreCase("desktop")) {
             stripped = "";
-        } else if (stripped.startsWith("./Desktop/")) {
+        } else if (stripped.toLowerCase().startsWith("./desktop/")) {
             stripped = stripped.substring(10);
         } else {
             return null;

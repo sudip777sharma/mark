@@ -19,6 +19,17 @@ export const taskApi = {
     }
   },
 
+  async getLlmLogs(taskId: string): Promise<Array<{ id: number; taskId: string; phase: string; prompt: string; thinking: string; response: string; createdAt: string }>> {
+    try {
+      const res = await fetch(`${API_BASE}/${taskId}/llm-logs`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (err) {
+      console.warn('Error fetching LLM logs:', err);
+      return [];
+    }
+  },
+
   async getTask(taskId: string): Promise<TaskResponse | null> {
     try {
       const res = await fetch(`${API_BASE}/${taskId}`);

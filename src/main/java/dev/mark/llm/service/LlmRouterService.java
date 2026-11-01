@@ -27,7 +27,7 @@ public class LlmRouterService implements LlmProviderService {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final LlmInteractionLogRepository logRepository;
     
-    private static final Pattern THINKING_PATTERN = Pattern.compile("(?s)<thinking>(.*?)</thinking>");
+    private static final Pattern THINKING_PATTERN = Pattern.compile("(?s)<(?:thinking|think)>(.*?)</(?:thinking|think)>");
 
     public LlmRouterService(
             GeminiLlmProviderService gemini,
@@ -201,15 +201,17 @@ public class LlmRouterService implements LlmProviderService {
                 Matcher m = THINKING_PATTERN.matcher(rawResponse);
                 if (m.find()) {
                     thought = m.group(1).trim();
-                    response = rawResponse.replaceAll("(?s)<thinking>.*?</thinking>", "").trim();
+                    response = rawResponse.replaceAll("(?s)<(?:thinking|think)>.*?</(?:thinking|think)>", "").trim();
                 } else if (rawResponse.contains("```json")) {
                     // Sometimes the thought is just outside the JSON block
                     int jsonStart = rawResponse.indexOf("```json");
                     thought = rawResponse.substring(0, jsonStart).trim();
                     response = rawResponse.substring(jsonStart).trim();
-                } else if (req.phase() != null && req.phase().equals("Planning")) {
-                    // For planning, maybe the entire thing is the thought if JSON failed, or mixed
+                } else {
                     thought = rawResponse;
+                }
+                if (thought != null && thought.isBlank()) {
+                    thought = rawResponse.trim();
                 }
             }
             

@@ -13,6 +13,7 @@ export function useTaskPoller() {
   const setIsStreaming = useAgentStore((s) => s.setIsStreaming);
   const appendLlmThoughtChunk = useAgentStore((s) => s.appendLlmThoughtChunk);
   const clearLlmThoughtStream = useAgentStore((s) => s.clearLlmThoughtStream);
+  const setLlmThoughtStream = useAgentStore((s) => s.setLlmThoughtStream);
   const setVoiceState = useAgentStore((s) => s.setVoiceState);
   const setAgentSpeechText = useAgentStore((s) => s.setAgentSpeechText);
   const setWaitingUserInput = useAgentStore((s) => s.setWaitingUserInput);
@@ -40,6 +41,27 @@ export function useTaskPoller() {
       });
     }
 
+    const loadPersistedThoughts = (tId: string) => {
+      taskApi.getLlmLogs(tId).then((logs) => {
+        if (logs && logs.length > 0) {
+          const formatted = logs
+            .map((l) => {
+              const header = l.phase ? `=== [${l.phase}] ===` : '=== [LLM Interaction] ===';
+              const thought = l.thinking && l.thinking.trim() ? l.thinking.trim() : null;
+              const resp = l.response && l.response.trim() ? l.response.trim() : null;
+              if (thought && resp && thought !== resp) {
+                return `${header}\nThought:\n${thought}\n\nResponse:\n${resp}`;
+              }
+              return `${header}\n${thought || resp || '(No content)'}`;
+            })
+            .join('\n\n---\n\n');
+          if (formatted.trim()) {
+            setLlmThoughtStream(formatted);
+          }
+        }
+      }).catch((e) => console.warn('Failed to load LLM logs:', e));
+    };
+
     const isRunning = activeTask.status === 'CREATED' || 
                       activeTask.status === 'PLANNING' || 
                       activeTask.status === 'EXECUTING' || 
@@ -47,6 +69,7 @@ export function useTaskPoller() {
                       activeTask.status === 'COOLDOWN';
     if (!isRunning) {
       setIsStreaming(false);
+      loadPersistedThoughts(taskId);
       return;
     }
 
@@ -160,6 +183,7 @@ export function useTaskPoller() {
         if (freshTask.status === 'COMPLETED') {
           setActiveTask(freshTask);
           setIsStreaming(false);
+          loadPersistedThoughts(taskId);
           setVoiceState('speaking');
           const answer = freshTask.finalAnswer || 'Task successfully verified and completed.';
           setAgentSpeechText(answer);
@@ -188,6 +212,7 @@ export function useTaskPoller() {
         } else if (freshTask.status === 'FAILED') {
           setActiveTask(freshTask);
           setIsStreaming(false);
+          loadPersistedThoughts(taskId);
           setVoiceState('idle');
           const failureDetail = freshTask.finalAnswer || 'Task execution failed.';
           setAgentSpeechText(failureDetail);

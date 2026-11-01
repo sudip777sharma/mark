@@ -257,15 +257,18 @@ public class AgentOrchestratorService {
         state.updateWorldState(currentWorldState);
 
         String systemPrompt = promptBuilder.systemPromptForExecution(state.plan(), currentWorldState,
-                deltaService.formatWorldStateDelta(stateDelta));
+                deltaService.formatWorldStateDelta(stateDelta), stepNumber);
 
         List<LlmMessageDTO> context = buildContext(state);
+        String userPrompt = (state.plan() != null && stepNumber <= state.plan().size())
+                ? "Execute Plan Step " + stepNumber + ": " + state.plan().get(stepNumber - 1)
+                : "Continue execution.";
         LlmRequestDTO request = new LlmRequestDTO(
                 state.taskId(),
                 "Execution",
                 state.configId(),
                 systemPrompt,
-                "Continue execution.",
+                userPrompt,
                 toolRegistryDefinitions(),
                 "auto",
                 context);
