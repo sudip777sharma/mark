@@ -382,7 +382,7 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
                 return trimmed.substring(start, end).trim();
             }
         }
-        String noThinking = trimmed.replaceAll("(?s)<thinking>.*?</thinking>", "").trim();
+        String noThinking = trimmed.replaceAll("(?s)<(?:thinking|think)>.*?</(?:thinking|think)>", "").trim();
         int firstBrace = noThinking.indexOf('{');
         int lastBrace = noThinking.lastIndexOf('}');
         if (firstBrace != -1 && lastBrace > firstBrace) {

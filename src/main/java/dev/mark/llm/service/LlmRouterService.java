@@ -228,8 +228,10 @@ public class LlmRouterService implements LlmProviderService {
                         fullPrompt.append("[").append(m.role()).append("]: ").append(m.content()).append("\n");
                     }
                 }
-            } else if (req.userPrompt() != null) {
-                fullPrompt.append(req.userPrompt());
+                fullPrompt.append("\n");
+            }
+            if (req.userPrompt() != null && !req.userPrompt().isBlank()) {
+                fullPrompt.append("\n=== ACTIVE INJECTED USER PROMPT ===\n").append(req.userPrompt()).append("\n");
             }
 
             LlmInteractionLogEntity log = new LlmInteractionLogEntity(
@@ -259,10 +261,11 @@ public class LlmRouterService implements LlmProviderService {
             return gemini; 
         } else {
             String nextApiKey = llmSettingsService.getNextApiKey(config.getId());
+            String resolvedBaseUrl = resolveBaseUrl(config);
             return new OpenAiCompatibleProviderService(
                     config.getId(),
                     config.getConfigName(),
-                    config.getBaseUrl(),
+                    resolvedBaseUrl,
                     nextApiKey,
                     config.getActiveModel(),
                     restClientBuilder,
@@ -270,5 +273,19 @@ public class LlmRouterService implements LlmProviderService {
                     llmSettingsService
             );
         }
+    }
+
+    private String resolveBaseUrl(LlmProviderConfig config) {
+        String url = config.getBaseUrl();
+        if (url != null && !url.isBlank()) {
+            return url.trim();
+        }
+        String type = config.getProviderType() != null ? config.getProviderType().toLowerCase() : "";
+        return switch (type) {
+            case "groq" -> "https://api.groq.com/openai/v1";
+            case "openrouter" -> "https://openrouter.ai/api/v1";
+            case "local" -> "http://localhost:11434/v1";
+            default -> "https://api.openai.com/v1";
+        };
     }
 }

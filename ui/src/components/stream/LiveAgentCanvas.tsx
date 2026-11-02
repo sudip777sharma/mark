@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useAgentStore } from '../../store/agentStore';
 import { taskApi } from '../../api/taskClient';
 import { ToolCallCard } from './ToolCallCard';
+import { InjectedPromptInspector } from './InjectedPromptInspector';
 import {
   Brain,
   ListTodo,
@@ -14,6 +15,7 @@ import {
   AlertTriangle,
   Send,
   Check,
+  Code,
 } from 'lucide-react';
 
 const AnimatedEllipsis: React.FC = () => {
@@ -38,9 +40,11 @@ export const LiveAgentCanvas: React.FC = () => {
   const setWaitingUserInput = useAgentStore((s) => s.setWaitingUserInput);
   const setActiveTask = useAgentStore((s) => s.setActiveTask);
   const addStreamLog = useAgentStore((s) => s.addStreamLog);
+  const llmInteractionLogs = useAgentStore((s) => s.llmInteractionLogs);
 
   const [humanReplyText, setHumanReplyText] = React.useState('');
   const [isSubmittingReply, setIsSubmittingReply] = React.useState(false);
+  const [showPromptInspector, setShowPromptInspector] = React.useState(false);
 
   const handleSendHumanReply = async () => {
     const tId = activeTask?.taskId || activeTask?.id || waitingUserInput?.taskId;
@@ -330,7 +334,25 @@ export const LiveAgentCanvas: React.FC = () => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
           <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-secondary)' }}>Execution Trace</span>
-          <div style={{ display: 'flex', gap: '12px' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <button
+              onClick={() => setShowPromptInspector((prev) => !prev)}
+              className="glass-button"
+              style={{
+                fontSize: '11px',
+                padding: '4px 10px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                color: showPromptInspector ? 'var(--accent-cyan)' : 'var(--text-secondary)',
+                borderColor: showPromptInspector ? 'var(--accent-cyan)' : undefined,
+                background: showPromptInspector ? 'rgba(6, 182, 212, 0.15)' : undefined,
+              }}
+              title="View the exact prompt injected into the LLM"
+            >
+              <Code size={13} />
+              <span>Injected Prompts {llmInteractionLogs.length > 0 ? `(${llmInteractionLogs.length})` : ''}</span>
+            </button>
             <button
               onClick={() => setExpandAllSignal(prev => prev + 1)}
               className="glass-button"
@@ -347,6 +369,13 @@ export const LiveAgentCanvas: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {showPromptInspector && (
+          <InjectedPromptInspector
+            logs={llmInteractionLogs}
+            onClose={() => setShowPromptInspector(false)}
+          />
+        )}
         
         {streamLogs.map((log) => {
           if (log.type === 'tool:invoking' || log.type === 'tool:result') {
@@ -381,6 +410,26 @@ export const LiveAgentCanvas: React.FC = () => {
                   <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--accent-violet)' }}>
                     Agent Reasoning
                   </span>
+                  <button
+                    onClick={() => setShowPromptInspector(true)}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid rgba(139, 92, 246, 0.3)',
+                      borderRadius: '4px',
+                      color: 'var(--accent-violet)',
+                      fontSize: '10px',
+                      padding: '2px 8px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      marginLeft: '6px',
+                    }}
+                    title="Inspect the prompt injected into the LLM for this step"
+                  >
+                    <Code size={11} />
+                    <span>Injected Prompt</span>
+                  </button>
                   <span style={{ fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', marginLeft: 'auto' }}>
                     {log.timestamp}
                   </span>
@@ -550,9 +599,30 @@ export const LiveAgentCanvas: React.FC = () => {
                 <Brain size={14} color="var(--accent-cyan)" />
                 <span>{isStreaming ? '🧠 LLM Thought (Live Streaming):' : '🧠 LLM Thought / Reasoning (Persisted):'}</span>
               </div>
-              <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
-                {isStreaming ? 'Live' : 'Saved in DB'}
-              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <button
+                  onClick={() => setShowPromptInspector((prev) => !prev)}
+                  style={{
+                    background: 'rgba(6, 182, 212, 0.1)',
+                    border: '1px solid rgba(6, 182, 212, 0.3)',
+                    borderRadius: '4px',
+                    color: 'var(--accent-cyan)',
+                    fontSize: '10px',
+                    padding: '2px 8px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                  title="Inspect the full prompt and system instructions sent to the LLM"
+                >
+                  <Code size={11} />
+                  <span>{showPromptInspector ? 'Hide Prompt' : 'View Injected Prompt'}</span>
+                </button>
+                <span style={{ fontSize: '10px', color: 'var(--text-dim)' }}>
+                  {isStreaming ? 'Live' : 'Saved in DB'}
+                </span>
+              </div>
             </div>
             <div style={{ lineHeight: 1.5, color: 'var(--text-muted)' }}>
               {llmThoughtStream}

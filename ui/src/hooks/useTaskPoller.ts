@@ -17,6 +17,7 @@ export function useTaskPoller() {
   const setVoiceState = useAgentStore((s) => s.setVoiceState);
   const setAgentSpeechText = useAgentStore((s) => s.setAgentSpeechText);
   const setWaitingUserInput = useAgentStore((s) => s.setWaitingUserInput);
+  const setLlmInteractionLogs = useAgentStore((s) => s.setLlmInteractionLogs);
   const addRawLog = useAgentStore((s) => s.addRawLog);
 
   const seenStepsCountRef = useRef<number>(0);
@@ -44,6 +45,7 @@ export function useTaskPoller() {
     const loadPersistedThoughts = (tId: string) => {
       taskApi.getLlmLogs(tId).then((logs) => {
         if (logs && logs.length > 0) {
+          setLlmInteractionLogs(logs);
           const formatted = logs
             .map((l) => {
               const header = l.phase ? `=== [${l.phase}] ===` : '=== [LLM Interaction] ===';
@@ -189,6 +191,7 @@ export function useTaskPoller() {
             }
           }
           seenStepsCountRef.current = currentSteps.length;
+          loadPersistedThoughts(taskId);
         }
 
         if (freshTask.status === 'NEEDS_INPUT') {

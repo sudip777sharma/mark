@@ -106,19 +106,30 @@ public class AgentIntentRouterService {
 
             String rawContent = response.content() != null ? response.content().trim() : "";
             
-            // Strip out the <thinking> block to leave only the JSON
-            rawContent = rawContent.replaceAll("(?s)<thinking>.*?</thinking>", "").trim();
+            // Strip out <thinking> or <think> tags to leave only the JSON
+            rawContent = rawContent.replaceAll("(?s)<(?:thinking|think)>.*?</(?:thinking|think)>", "").trim();
             
             // Clean markdown fences if present
-            if (rawContent.startsWith("```json")) {
-                rawContent = rawContent.substring(7);
-            } else if (rawContent.startsWith("```")) {
-                rawContent = rawContent.substring(3);
+            if (rawContent.contains("```json")) {
+                int start = rawContent.indexOf("```json") + 7;
+                int end = rawContent.indexOf("```", start);
+                if (end > start) {
+                    rawContent = rawContent.substring(start, end).trim();
+                }
+            } else if (rawContent.contains("```")) {
+                int start = rawContent.indexOf("```") + 3;
+                int end = rawContent.indexOf("```", start);
+                if (end > start) {
+                    rawContent = rawContent.substring(start, end).trim();
+                }
             }
-            if (rawContent.endsWith("```")) {
-                rawContent = rawContent.substring(0, rawContent.length() - 3);
+
+            // Extract JSON between first '{' and last '}'
+            int firstBrace = rawContent.indexOf('{');
+            int lastBrace = rawContent.lastIndexOf('}');
+            if (firstBrace != -1 && lastBrace > firstBrace) {
+                rawContent = rawContent.substring(firstBrace, lastBrace + 1).trim();
             }
-            rawContent = rawContent.trim();
 
             JsonNode node = objectMapper.readTree(rawContent);
             String intentStr = node.path("intent").asText("AUTONOMOUS_TASK").toUpperCase();

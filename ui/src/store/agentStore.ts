@@ -12,6 +12,16 @@ export interface StreamLogItem {
   rawPayload?: any;
 }
 
+export interface LlmInteractionLog {
+  id?: number;
+  taskId: string;
+  phase: string;
+  prompt: string;
+  thinking: string;
+  response: string;
+  createdAt?: string;
+}
+
 interface AgentStoreState {
   // Navigation & Modes
   viewMode: AppViewMode;
@@ -48,6 +58,10 @@ interface AgentStoreState {
   clearStreamLogs: () => void;
   activePlan: string[];
   setActivePlan: (plan: string[]) => void;
+
+  // LLM Interaction Logs & Prompts
+  llmInteractionLogs: LlmInteractionLog[];
+  setLlmInteractionLogs: (logs: LlmInteractionLog[]) => void;
 
   // Human in the loop
   waitingUserInput: { taskId: string; prompt: string } | null;
@@ -107,6 +121,9 @@ export const useAgentStore = create<AgentStoreState>((set) => ({
   clearStreamLogs: () => set({ streamLogs: [] }),
   activePlan: [],
   setActivePlan: (activePlan) => set({ activePlan }),
+
+  llmInteractionLogs: [],
+  setLlmInteractionLogs: (llmInteractionLogs) => set({ llmInteractionLogs }),
 
   waitingUserInput: null,
   setWaitingUserInput: (waitingUserInput) => set({ waitingUserInput }),
