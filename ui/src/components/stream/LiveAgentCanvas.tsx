@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useAgentStore } from '../../store/agentStore';
 import { taskApi } from '../../api/taskClient';
 import { ToolCallCard } from './ToolCallCard';
@@ -36,6 +36,7 @@ export const LiveAgentCanvas: React.FC = () => {
   const llmThoughtStream = useAgentStore((s) => s.llmThoughtStream);
   const waitingUserInput = useAgentStore((s) => s.waitingUserInput);
   const setWaitingUserInput = useAgentStore((s) => s.setWaitingUserInput);
+  const setActiveTask = useAgentStore((s) => s.setActiveTask);
   const addStreamLog = useAgentStore((s) => s.addStreamLog);
 
   const [humanReplyText, setHumanReplyText] = React.useState('');
@@ -46,6 +47,9 @@ export const LiveAgentCanvas: React.FC = () => {
     if (!tId || !humanReplyText.trim() || isSubmittingReply) return;
     setIsSubmittingReply(true);
     try {
+      if (activeTask) {
+        setActiveTask({ ...activeTask, status: 'EXECUTING', currentAction: 'User reply submitted. Resuming task...' });
+      }
       await taskApi.replyToTask(tId, humanReplyText.trim());
       addStreamLog({
         id: Math.random().toString(),
@@ -68,6 +72,9 @@ export const LiveAgentCanvas: React.FC = () => {
     if (!tId || isSubmittingReply) return;
     setIsSubmittingReply(true);
     try {
+      if (activeTask) {
+        setActiveTask({ ...activeTask, status: 'EXECUTING', currentAction: 'Action approved. Resuming task...' });
+      }
       await taskApi.approveTask(tId);
       addStreamLog({
         id: Math.random().toString(),

@@ -78,7 +78,7 @@ public class ListDirectoryTool implements Tool {
                 "properties", Map.of(
                         "path", Map.of(
                                 "type", "string",
-                                "description", "Relative directory path, e.g. data/. Defaults to workspace root.")));
+                                "description", "Target directory path to inspect (relative to workspace root or Desktop folder). Defaults to workspace root.")));
     }
 
     @Override

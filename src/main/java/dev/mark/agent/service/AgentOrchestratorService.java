@@ -261,9 +261,12 @@ public class AgentOrchestratorService {
                 deltaService.formatWorldStateDelta(stateDelta), activePlanStep);
 
         List<LlmMessageDTO> context = buildContext(state);
-        String userPrompt = (state.plan() != null && activePlanStep <= state.plan().size())
-                ? "Execute Plan Step " + activePlanStep + ": " + state.plan().get(activePlanStep - 1)
+        String activeStepText = (state.plan() != null && activePlanStep <= state.plan().size())
+                ? state.plan().get(activePlanStep - 1)
                 : "Continue execution.";
+        String userPrompt = "Overall Mission Goal: " + state.goal()
+                + "\nActive Plan Step " + activePlanStep + ": " + activeStepText
+                + "\nCRITICAL: Always use the exact folder paths, file names, contacts, and application names specified in the Overall Mission Goal. Never use placeholder or dummy paths.";
         LlmRequestDTO request = new LlmRequestDTO(
                 state.taskId(),
                 "Execution",
@@ -318,8 +321,8 @@ public class AgentOrchestratorService {
                             if (!foundMatch)
                                 break;
                         } else if ("user".equals(msg.role()) && msg.content() != null
-                                && msg.content().startsWith("SYSTEM AUTO-OBSERVATION")) {
-                            // ignore auto-observations in between loop checks
+                                && (msg.content().startsWith("SYSTEM AUTO-OBSERVATION") || msg.content().startsWith("SYSTEM GUIDANCE"))) {
+                            // ignore auto-observations and guidance in between loop checks
                             continue;
                         } else if (!"tool".equals(msg.role())) {
                             break;
@@ -440,6 +443,23 @@ public class AgentOrchestratorService {
 
                 for (LlmToolObservationDTO obs : observations) {
                     state.addMessage(LlmMessageDTO.toolObservation(obs));
+                }
+
+                // Adaptive failure recovery: If a tool failed repeatedly, steer the model before the loop guardrail hits
+                for (LlmToolObservationDTO obs : observations) {
+                    if (!obs.successful()) {
+                        long failureCount = state.steps().stream()
+                                .filter(s -> obs.name().equals(s.toolName()) && s.outcome() != null && s.outcome().startsWith("Failed"))
+                                .count();
+                        if (failureCount >= 2) {
+                            String guidance = "SYSTEM GUIDANCE: The tool '" + obs.name()
+                                    + "' has failed repeatedly. Do NOT call the exact same tool with identical arguments again. "
+                                    + "Either try an alternative strategy/tool, verify required preconditions, or call 'ask_user' to explain the blocker and request guidance.";
+                            log.info("--- [ORCHESTRATOR:GUIDANCE_INJECTED] taskId={} guidance='{}'", state.taskId(), guidance);
+                            state.addMessage(LlmMessageDTO.userMessage(guidance));
+                            break;
+                        }
+                    }
                 }
 
                 if (transitionDetected) {

@@ -54,7 +54,7 @@ public class WriteFileTool implements Tool {
                 "properties", Map.of(
                         "path", Map.of(
                                 "type", "string",
-                                "description", "Relative path of the file to write, e.g. output/result.txt"),
+                                "description", "Relative path of the file to write"),
                         "content", Map.of(
                                 "type", "string",
                                 "description", "Text content to write to the file")),

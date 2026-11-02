@@ -202,13 +202,30 @@ public class WhatsAppWebTool implements Tool {
 
         } catch (Exception e) {
             log.error("WhatsApp Web action '{}' failed", action, e);
-            return new ToolResultDTO(false, "WhatsApp Web action '" + action + "' failed: " + e.getMessage(), Map.of("error", e.getMessage()));
+            String errorMsg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            if (errorMsg.contains("TargetClosedError") || errorMsg.contains("Target page, context or browser has been closed")) {
+                log.warn("Detected TargetClosedError in WhatsApp Web action '{}'. Resetting browser session...", action);
+                try {
+                    browserSession.reset();
+                } catch (Exception resetEx) {
+                    log.error("Failed to reset browser session", resetEx);
+                }
+                return new ToolResultDTO(false, "WhatsApp Web browser window was closed or disconnected. Browser session has been re-initialized. Please retry the operation.", Map.of("error", "BROWSER_WINDOW_CLOSED", "action", action));
+            }
+            return new ToolResultDTO(false, "WhatsApp Web action '" + action + "' failed: " + errorMsg, Map.of("error", errorMsg));
         }
     }
 
     Page ensureWhatsAppPage() {
         Page page = browserSession.getOrCreatePage();
-        String currentUrl = page.url();
+        String currentUrl = null;
+        try {
+            currentUrl = page.url();
+        } catch (Exception e) {
+            log.warn("Page url inspection failed, re-acquiring page...", e);
+            page = browserSession.getOrCreatePage();
+            currentUrl = page.url();
+        }
         if (currentUrl == null || !currentUrl.contains("web.whatsapp.com")) {
             log.info("Navigating to https://web.whatsapp.com in background...");
             page.navigate("https://web.whatsapp.com");
@@ -236,7 +253,14 @@ public class WhatsAppWebTool implements Tool {
 
             return new ToolResultDTO(true, "WhatsApp Web page loaded (initializing session).", Map.of("status", "INITIALIZING", "action", "open_session"));
         } catch (Exception e) {
-            return new ToolResultDTO(false, "Failed to load WhatsApp Web session: " + e.getMessage(), Map.of());
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            if (msg.contains("TargetClosedError") || msg.contains("Target page, context or browser has been closed")) {
+                try {
+                    browserSession.reset();
+                } catch (Exception ignored) {}
+                return new ToolResultDTO(false, "WhatsApp Web browser window was closed or disconnected. Browser session has been re-initialized.", Map.of("error", "BROWSER_WINDOW_CLOSED"));
+            }
+            return new ToolResultDTO(false, "Failed to load WhatsApp Web session: " + msg, Map.of());
         }
     }
 

@@ -28,12 +28,14 @@ public class TaskController {
     private final TaskRepository taskRepository;
     private final java.util.concurrent.Executor agentTaskExecutor;
     private final LlmInteractionLogRepository llmLogRepository;
+    private final dev.mark.task.service.TaskSseService taskSseService;
 
-    public TaskController(AgentOrchestratorService agentEngine, TaskRepository taskRepository, @org.springframework.beans.factory.annotation.Qualifier("agentTaskExecutor") java.util.concurrent.Executor agentTaskExecutor, LlmInteractionLogRepository llmLogRepository) {
+    public TaskController(AgentOrchestratorService agentEngine, TaskRepository taskRepository, @org.springframework.beans.factory.annotation.Qualifier("agentTaskExecutor") java.util.concurrent.Executor agentTaskExecutor, LlmInteractionLogRepository llmLogRepository, dev.mark.task.service.TaskSseService taskSseService) {
         this.agentEngine = agentEngine;
         this.taskRepository = taskRepository;
         this.agentTaskExecutor = agentTaskExecutor;
         this.llmLogRepository = llmLogRepository;
+        this.taskSseService = taskSseService;
     }
 
     @PostMapping
@@ -79,7 +81,16 @@ public class TaskController {
         log.info(">>> [TASK:REPLY_RECEIVED] taskId={} reply='{}'", taskId, reply);
         boolean delivered = agentEngine.submitReply(taskId, reply);
         if (!delivered) {
-            log.warn("--- [TASK:NO_PENDING_REPLY] taskId={} had no waiting reply future", taskId);
+            log.warn("--- [TASK:NO_PENDING_REPLY] taskId={} had no waiting reply future; self-healing orphaned task", taskId);
+            taskRepository.findById(taskId).ifPresent(task -> {
+                if (task.getStatus() == dev.mark.agent.model.AgentStatusModel.NEEDS_INPUT) {
+                    task.setStatus(dev.mark.agent.model.AgentStatusModel.COMPLETED);
+                    task.setCurrentAction("User reply recorded: " + reply);
+                    task.setFinalAnswer(reply);
+                    taskRepository.save(task);
+                    taskSseService.broadcastTaskUpdate(task);
+                }
+            });
         }
     }
 

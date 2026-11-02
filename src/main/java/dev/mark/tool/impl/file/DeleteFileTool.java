@@ -60,7 +60,7 @@ public class DeleteFileTool implements Tool {
                 "properties", Map.of(
                         "path", Map.of(
                                 "type", "string",
-                                "description", "Relative path of the file or directory to delete, e.g. output/result.txt")
+                                "description", "Relative path of the file or directory to delete")
                 ),
                 "required", List.of("path"));
     }

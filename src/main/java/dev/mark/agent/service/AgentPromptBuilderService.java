@@ -253,6 +253,7 @@ public class AgentPromptBuilderService {
         sb.append("  * For generic GUI tasks: If no high-level tool exists, plan to use 'inspect_ui' and 'desktop_automation'.\n\n");
         sb.append("PHASE 2: DYNAMIC STRATEGY\n");
         sb.append("- Keep the plan minimal, direct, and concise (usually 1-3 direct steps when using specialized tools).\n");
+        sb.append("- PATH & PARAMETER SPECIFICITY: Always copy the exact directory paths, folder names, file names, contact numbers, and application names directly from the user's prompt into the plan steps. Never use vague phrases like 'the specified directory', 'the folder', or 'the contact'.\n");
         sb.append("- Do not break high-level tool operations into manual micro-steps like 'click search bar', 'type text', 'press enter'.\n\n");
         sb.append("PHASE 3: ACTIONABLE PLAN\n");
         sb.append("First, explain your decomposition and tool selection reasoning inside <thinking>...</thinking> tags.\n");

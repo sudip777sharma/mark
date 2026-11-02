@@ -47,13 +47,43 @@ public class BrowserSession implements AutoCloseable {
         }
     }
 
-    public Page getOrCreatePage() {
-        if (this.currentPage == null || this.currentPage.isClosed()) {
-            log.debug("event=browser_new_page");
-            this.currentPage = browserContext.pages().size() > 0 ? browserContext.pages().get(0) : browserContext.newPage();
-            this.currentPage.setDefaultTimeout(userPreferenceService.getInt("browser.timeoutMs", properties.timeoutMs()));
+    public synchronized void reset() {
+        log.info("event=browser_reset");
+        if (currentPage != null) {
+            try { currentPage.close(); } catch (Exception ignored) {}
+            currentPage = null;
         }
-        return this.currentPage;
+        if (browserContext != null) {
+            try { browserContext.close(); } catch (Exception ignored) {}
+            browserContext = null;
+        }
+        if (playwright != null) {
+            try { playwright.close(); } catch (Exception ignored) {}
+            playwright = null;
+        }
+        init();
+    }
+
+    public synchronized Page getOrCreatePage() {
+        try {
+            if (this.browserContext == null) {
+                init();
+            }
+            if (this.currentPage == null || this.currentPage.isClosed()) {
+                log.debug("event=browser_new_page");
+                java.util.List<Page> pages = browserContext.pages();
+                this.currentPage = !pages.isEmpty() ? pages.get(0) : browserContext.newPage();
+                this.currentPage.setDefaultTimeout(userPreferenceService.getInt("browser.timeoutMs", properties.timeoutMs()));
+            }
+            return this.currentPage;
+        } catch (Exception e) {
+            log.warn("event=browser_page_failed_reconnecting error={}", e.getMessage());
+            reset();
+            java.util.List<Page> pages = browserContext.pages();
+            this.currentPage = !pages.isEmpty() ? pages.get(0) : browserContext.newPage();
+            this.currentPage.setDefaultTimeout(userPreferenceService.getInt("browser.timeoutMs", properties.timeoutMs()));
+            return this.currentPage;
+        }
     }
 
     public Page getCurrentPage() {
@@ -61,7 +91,11 @@ public class BrowserSession implements AutoCloseable {
     }
 
     public boolean hasActivePage() {
-        return this.currentPage != null && !this.currentPage.isClosed();
+        try {
+            return this.currentPage != null && !this.currentPage.isClosed();
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     @PreDestroy
