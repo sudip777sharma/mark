@@ -90,6 +90,19 @@ class WhatsAppWebToolTest {
 
     @Test
     void testSendMessagePhoneNumber() {
+        String mockOutgoingJson = """
+            [
+                {
+                    "id": "true_918280901077@c.us_3EB0TEST123",
+                    "text": "Hello from MARK!",
+                    "fromMe": true,
+                    "status": "Sent"
+                }
+            ]
+            """;
+        // First evaluate call is for pre-send snapshot (empty), second is for post-send verification
+        when(page.evaluate(anyString())).thenReturn("[]").thenReturn(mockOutgoingJson);
+
         ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
             "action", "send_message",
             "contact", "8280901077",
@@ -99,9 +112,27 @@ class WhatsAppWebToolTest {
         ToolResultDTO result = whatsAppWebTool.execute(request);
         assertTrue(result.successful());
         assertEquals("SENT", result.metadata().get("status"));
+        assertEquals("VERIFIED", result.metadata().get("verification_status"));
         assertEquals("8280901077", result.metadata().get("contact"));
         verify(page).navigate(contains("send?phone=918280901077"));
         verify(locator).click();
+    }
+
+    @Test
+    void testSendMessageUnverifiedWhenPendingOrMissing() {
+        // Evaluate returns empty list, simulating send failure or DOM absence
+        when(page.evaluate(anyString())).thenReturn("[]");
+
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "send_message",
+            "contact", "8280901077",
+            "message", "Hello from MARK!"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertFalse(result.successful());
+        assertEquals("UNVERIFIED", result.metadata().get("verification_status"));
+        assertEquals(Boolean.FALSE, result.metadata().get("verified"));
     }
 
     @Test
@@ -188,6 +219,60 @@ class WhatsAppWebToolTest {
                 {
                     "pre": "[10:15 am, 11/1/2026] You: ",
                     "text": "different message",
+                    "fromMe": true,
+                    "status": "Sent"
+                }
+            ]
+            """;
+        when(page.evaluate(anyString())).thenReturn(mockJson);
+
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "verify_message",
+            "contact", "8280901077",
+            "expected_message", "hi"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertFalse(result.successful());
+        assertEquals(Boolean.FALSE, result.metadata().get("verified"));
+        assertTrue(result.observation().contains("VERIFICATION FAILED"));
+    }
+
+    @Test
+    void testVerifyMessage_IncomingBubbleRejected() {
+        String mockJson = """
+            [
+                {
+                    "pre": "[10:15 am, 11/1/2026] Sudeep Sharma: ",
+                    "text": "hi",
+                    "fromMe": false,
+                    "status": "Received"
+                }
+            ]
+            """;
+        when(page.evaluate(anyString())).thenReturn(mockJson);
+
+        ToolRequestDTO request = new ToolRequestDTO(UUID.randomUUID(), "whatsapp_web_automation", Map.of(
+            "action", "verify_message",
+            "contact", "8280901077",
+            "expected_message", "hi"
+        ));
+
+        ToolResultDTO result = whatsAppWebTool.execute(request);
+        assertFalse(result.successful());
+        assertEquals(Boolean.FALSE, result.metadata().get("verified"));
+        assertEquals("UNVERIFIED", result.metadata().get("verification_status"));
+        assertTrue(result.observation().contains("VERIFICATION FAILED"));
+        assertTrue(result.observation().contains("Their Side"));
+    }
+
+    @Test
+    void testVerifyMessage_SubstringNotMatched() {
+        String mockJson = """
+            [
+                {
+                    "pre": "[10:15 am, 11/1/2026] You: ",
+                    "text": "hi there everyone",
                     "fromMe": true,
                     "status": "Sent"
                 }

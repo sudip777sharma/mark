@@ -2,7 +2,7 @@ spring:
   application:
     name: mark
   datasource:
-    url: jdbc:h2:file:./mark-workspace/db/markdb;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
+    url: jdbc:h2:file:./mark-internal/db/markdb;DB_CLOSE_DELAY=-1;AUTO_SERVER=TRUE
     driverClassName: org.h2.Driver
     username: sa
     password:
@@ -13,6 +13,7 @@ spring:
     show-sql: false
 server:
   port: 8081
+  address: 127.0.0.1
 mark:
   agent:
     max-steps: 30
@@ -29,5 +30,3 @@ management:
 logging:
   level:
     dev.mark: DEBUG
-
-

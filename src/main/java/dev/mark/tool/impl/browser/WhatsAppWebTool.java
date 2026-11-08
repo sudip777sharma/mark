@@ -275,32 +275,76 @@ public class WhatsAppWebTool implements Tool {
         return null;
     }
 
-    private boolean verifyOutgoingMessageInDom(Page page, String expectedText, int waitMs) {
+    public String normalizeMessageText(String text) {
+        if (text == null) return "";
+        return text.replaceAll("[\\u200B-\\u200D\\uFEFF]", "")
+                   .replaceAll("\\r?\\n", " ")
+                   .replaceAll("\\s+", " ")
+                   .trim()
+                   .toLowerCase();
+    }
+
+    public Set<String> snapshotDomMessageIds(Page page) {
+        if (page == null) return Collections.emptySet();
+        try {
+            String js = """
+                () => {
+                    const ids = [];
+                    const nodes = document.querySelectorAll('#main div[data-id], #main div.message-out, #main div.message-in');
+                    nodes.forEach(el => {
+                        const id = el.getAttribute('data-id');
+                        if (id) ids.push(id);
+                    });
+                    return JSON.stringify(ids);
+                }
+                """;
+            Object res = page.evaluate(js);
+            if (res instanceof String json && !json.isBlank() && !json.equals("[]")) {
+                JsonNode array = objectMapper.readTree(json);
+                if (array.isArray()) {
+                    Set<String> set = new HashSet<>();
+                    array.forEach(item -> {
+                        String id = item.asText("");
+                        if (!id.isBlank()) set.add(id);
+                    });
+                    return set;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Notice snapshotting pre-send message IDs: {}", e.getMessage());
+        }
+        return Collections.emptySet();
+    }
+
+    private boolean verifyOutgoingMessageInDom(Page page, String expectedText, Set<String> preSendIds, int waitMs) {
         long end = System.currentTimeMillis() + waitMs;
-        String cleanTarget = expectedText.trim().toLowerCase();
+        String cleanTarget = normalizeMessageText(expectedText);
 
         String jsExtract = """
             () => {
                 const list = [];
-                // 1. Directly query all message containers in active conversation pane (handles self-chat echoes and outgoing messages)
-                const rows = document.querySelectorAll('#main div.message-out, #main div.message-in, #main div[data-id], #main div[class*="message-"], div.message-out, div[class*="message-out"]');
+                const rows = document.querySelectorAll('#main div[data-id], #main div.message-out, #main div.message-in');
                 for (const row of rows) {
+                    const dataId = row.getAttribute('data-id') || '';
+                    let fromMe = false;
+                    if (dataId.startsWith('true_')) {
+                        fromMe = true;
+                    } else if (dataId.startsWith('false_')) {
+                        fromMe = false;
+                    } else {
+                        fromMe = row.classList.contains('message-out') || !!row.closest('.message-out');
+                    }
+
                     const textEl = row.querySelector('span.selectable-text, div.copyable-text span, div.copyable-text, span[dir="ltr"]');
                     const text = textEl ? textEl.innerText : row.innerText;
+                    
                     let status = 'Sent';
                     if (row.querySelector('span[data-icon="msg-dblcheck-ack"]')) status = 'Read';
                     else if (row.querySelector('span[data-icon="msg-dblcheck"]')) status = 'Delivered';
                     else if (row.querySelector('span[data-icon="msg-check"]')) status = 'Sent';
                     else if (row.querySelector('span[data-icon="msg-time"]')) status = 'Pending';
-                    list.push({ text: text || '', fromMe: true, status: status });
-                }
-                // 2. Also check any copyable-text blocks as secondary extraction
-                if (list.length === 0) {
-                    const blocks = document.querySelectorAll('#main div.copyable-text, div.copyable-text');
-                    for (const b of blocks) {
-                        const textEl = b.querySelector('span.selectable-text') || b;
-                        list.push({ text: textEl.innerText || '', fromMe: true, status: 'Sent' });
-                    }
+                    
+                    list.push({ id: dataId, text: text || '', fromMe: fromMe, status: status });
                 }
                 return JSON.stringify(list);
             }
@@ -312,19 +356,28 @@ public class WhatsAppWebTool implements Tool {
                 if (res instanceof String json && !json.isBlank() && !json.equals("[]")) {
                     JsonNode array = objectMapper.readTree(json);
                     if (array.isArray()) {
-                        for (int i = array.size() - 1; i >= Math.max(0, array.size() - 12); i--) {
+                        for (int i = array.size() - 1; i >= 0; i--) {
                             JsonNode item = array.get(i);
-                            String text = item.path("text").asText("").trim().toLowerCase();
-                            if (!text.isBlank() && (text.contains(cleanTarget) || cleanTarget.contains(text))) {
-                                log.info("Outgoing WhatsApp message verified in DOM: '{}' [status: {}]", text, item.path("status").asText("Sent"));
-                                return true;
+                            String dataId = item.path("id").asText("");
+                            boolean fromMe = item.path("fromMe").asBoolean(false);
+                            String status = item.path("status").asText("");
+                            String rawText = item.path("text").asText("");
+                            String normalizedText = normalizeMessageText(rawText);
+
+                            // Strict outgoing verification:
+                            // 1. Must be fromMe (outgoing)
+                            // 2. Exact normalized text match (no substring contains)
+                            // 3. New message (not in preSendIds)
+                            // 4. Status not Pending
+                            if (fromMe && normalizedText.equals(cleanTarget)) {
+                                boolean isNew = preSendIds == null || preSendIds.isEmpty() || dataId.isBlank() || !preSendIds.contains(dataId);
+                                if (isNew && !"Pending".equalsIgnoreCase(status)) {
+                                    log.info("Outgoing WhatsApp message strictly verified in DOM: id='{}' text='{}' status='{}'",
+                                            dataId, rawText, status);
+                                    return true;
+                                }
                             }
                         }
-                    }
-                } else if (res == null) {
-                    // Fallback for Mockito test environments where evaluate is unmocked
-                    if (page.locator("#main div.message-out, div.message-out").count() > 0) {
-                        return true;
                     }
                 }
             } catch (Exception e) {
@@ -332,7 +385,7 @@ public class WhatsAppWebTool implements Tool {
             }
 
             try {
-                Thread.sleep(400);
+                Thread.sleep(300);
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
                 break;
@@ -502,6 +555,9 @@ public class WhatsAppWebTool implements Tool {
             }
         }
 
+        // Snapshot existing message IDs before dispatching new message to prevent false-positive matching
+        Set<String> preSendIds = snapshotDomMessageIds(page);
+
         try {
             page.waitForSelector("#main footer div[contenteditable='true']",
                 new Page.WaitForSelectorOptions().setTimeout(10000));
@@ -542,7 +598,7 @@ public class WhatsAppWebTool implements Tool {
         }
 
         // 3. Post-condition verification: check DOM for outgoing message bubble (no duplicate send attempts)
-        boolean verified = verifyOutgoingMessageInDom(page, message, 6000);
+        boolean verified = verifyOutgoingMessageInDom(page, message, preSendIds, 6000);
 
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("contact", contact);
@@ -589,10 +645,20 @@ public class WhatsAppWebTool implements Tool {
                 const blocks = document.querySelectorAll('#main div.copyable-text[data-pre-plain-text]');
                 for (const b of blocks) {
                     const pre = b.getAttribute('data-pre-plain-text') || '';
-                    const textEl = b.querySelector('span.selectable-text');
+                    const textEl = b.querySelector('span.selectable-text') || b;
                     const text = textEl ? textEl.innerText : b.innerText;
-                    const row = b.closest('.message-out, .message-in');
-                    const fromMe = row ? row.classList.contains('message-out') : false;
+                    
+                    const row = b.closest('div[data-id], .message-out, .message-in') || b;
+                    const dataId = row.getAttribute('data-id') || '';
+                    let fromMe = false;
+                    if (dataId.startsWith('true_')) {
+                        fromMe = true;
+                    } else if (dataId.startsWith('false_')) {
+                        fromMe = false;
+                    } else {
+                        const container = b.closest('.message-out, .message-in') || row;
+                        fromMe = container.classList.contains('message-out') || !!container.closest('.message-out');
+                    }
                     
                     let status = fromMe ? 'Sent' : 'Received';
                     if (fromMe && row) {
@@ -604,11 +670,19 @@ public class WhatsAppWebTool implements Tool {
                     list.push({ pre, text, fromMe, status });
                 }
                 if (list.length === 0) {
-                    const rows = document.querySelectorAll('#main div.message-out, #main div.message-in');
+                    const rows = document.querySelectorAll('#main div[data-id], #main div.message-out, #main div.message-in');
                     for (const row of rows) {
-                        const textEl = row.querySelector('span.selectable-text');
+                        const dataId = row.getAttribute('data-id') || '';
+                        let fromMe = false;
+                        if (dataId.startsWith('true_')) {
+                            fromMe = true;
+                        } else if (dataId.startsWith('false_')) {
+                            fromMe = false;
+                        } else {
+                            fromMe = row.classList.contains('message-out') || !!row.closest('.message-out');
+                        }
+                        const textEl = row.querySelector('span.selectable-text, div.copyable-text span, div.copyable-text');
                         if (textEl && textEl.innerText) {
-                            const fromMe = row.classList.contains('message-out');
                             let status = fromMe ? 'Sent' : 'Received';
                             if (fromMe) {
                                 if (row.querySelector('span[data-icon="msg-dblcheck-ack"]')) status = 'Read';
@@ -665,32 +739,45 @@ public class WhatsAppWebTool implements Tool {
     }
 
     private ToolResultDTO evaluateVerification(List<WhatsAppWebMessage> recentMessages, String expectedMessage, String contact, Map<String, Object> metadata) {
-        boolean verified = false;
-        WhatsAppWebMessage matchedMessage = null;
+        String targetNorm = normalizeMessageText(expectedMessage);
+        WhatsAppWebMessage matchedOutgoing = null;
+        WhatsAppWebMessage matchedIncoming = null;
 
         for (int i = recentMessages.size() - 1; i >= 0; i--) {
             WhatsAppWebMessage m = recentMessages.get(i);
-            if (m.text().equalsIgnoreCase(expectedMessage)
-                    || m.text().toLowerCase().contains(expectedMessage.toLowerCase())
-                    || m.raw().toLowerCase().contains(expectedMessage.toLowerCase())) {
-                verified = true;
-                matchedMessage = m;
-                break;
+            String msgNorm = normalizeMessageText(m.text());
+            if (msgNorm.equals(targetNorm)) {
+                if (m.fromMe() && matchedOutgoing == null) {
+                    matchedOutgoing = m;
+                } else if (!m.fromMe() && matchedIncoming == null) {
+                    matchedIncoming = m;
+                }
             }
         }
 
-        metadata.put("verified", verified);
         metadata.put("expected_message", expectedMessage);
 
-        if (verified) {
-            metadata.put("matched_message", matchedMessage);
-            String sideStr = matchedMessage.fromMe() ? "My Side" : "Their Side";
+        if (matchedOutgoing != null) {
+            metadata.put("verified", true);
+            metadata.put("verification_status", "VERIFIED");
+            metadata.put("matched_message", matchedOutgoing);
             String summary = String.format(
-                "VERIFICATION PASSED: Confirmed message \"%s\" exists in WhatsApp Web chat history with '%s'! [Side: %s, Sender: %s, Time: %s, Status: %s]",
-                expectedMessage, contact != null ? contact : "active_chat", sideStr, matchedMessage.sender(), matchedMessage.timestamp(), matchedMessage.status()
+                "VERIFICATION PASSED: Confirmed message \"%s\" exists on [My Side] in WhatsApp Web chat history with '%s'! [Sender: %s, Time: %s, Status: %s]",
+                expectedMessage, contact != null ? contact : "active_chat", matchedOutgoing.sender(), matchedOutgoing.timestamp(), matchedOutgoing.status()
             );
             return new ToolResultDTO(true, summary + "\n\nRecent conversation messages:\n" + formatMessages(recentMessages), metadata);
+        } else if (matchedIncoming != null) {
+            metadata.put("verified", false);
+            metadata.put("verification_status", "UNVERIFIED");
+            metadata.put("matched_message", matchedIncoming);
+            String summary = String.format(
+                "VERIFICATION FAILED: Message \"%s\" was found in incoming messages from [Their Side] (%s), but NO outgoing message from [My Side] was found with matching text.",
+                expectedMessage, matchedIncoming.sender()
+            );
+            return new ToolResultDTO(false, summary + "\n\nRecent conversation messages:\n" + formatMessages(recentMessages), metadata);
         } else {
+            metadata.put("verified", false);
+            metadata.put("verification_status", "UNVERIFIED");
             String summary = String.format(
                 "VERIFICATION FAILED: Message \"%s\" was NOT found in recent chat history with '%s'. (READ-ONLY check - no messages were sent)",
                 expectedMessage, contact != null ? contact : "active_chat"

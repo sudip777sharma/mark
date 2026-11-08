@@ -9,6 +9,9 @@ target/
 !.env.example
 application-local.yml
 
+# Internal runtime database and isolated state
+mark-internal/
+
 # Local runtime state and generated UI artifacts
 mark-workspace/db/
 mark-workspace/screenshots/

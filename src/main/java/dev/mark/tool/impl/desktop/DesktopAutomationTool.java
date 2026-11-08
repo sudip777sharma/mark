@@ -172,12 +172,26 @@ public class DesktopAutomationTool implements Tool {
     }
 
     /**
-     * Sets the system clipboard text content.
+     * Sets the system clipboard text content with retries for Windows clipboard contention.
      */
     public static void setClipboardText(String text) {
-        StringSelection selection = new StringSelection(text);
-        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-        clipboard.setContents(selection, selection);
+        StringSelection selection = new StringSelection(text != null ? text : "");
+        for (int i = 0; i < 5; i++) {
+            try {
+                Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
+                clipboard.setContents(selection, selection);
+                return;
+            } catch (IllegalStateException e) {
+                try {
+                    Thread.sleep(60);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            } catch (Exception e) {
+                break;
+            }
+        }
     }
 
     /**

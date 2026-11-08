@@ -260,7 +260,7 @@ public class AgentPromptBuilderService {
         sb.append("First, explain your decomposition and tool selection reasoning inside <thinking>...</thinking> tags.\n");
         sb.append("Then output the final plan as a JSON object with a single key 'steps' containing an array of concise descriptive string steps.\n");
         sb.append("CRITICAL: Each item in 'steps' MUST be a plain string (NOT a nested JSON object). For example:\n");
-        sb.append("{\n  \"steps\": [\n    \"Check WhatsApp Web session and verify login status using whatsapp_web_automation action 'open_session'\",\n    \"Send message using whatsapp_web_automation action 'send_message' contact='8280901077' message='hi'\"\n  ]\n}\n");
+        sb.append("{\n  \"steps\": [\n    \"Check WhatsApp Web session and verify login status using whatsapp_web_automation action 'open_session'\",\n    \"Send message using whatsapp_web_automation action 'send_message' contact='+1234567890' message='hi'\"\n  ]\n}\n");
         return sb.toString();
     }
 
@@ -279,27 +279,6 @@ public class AgentPromptBuilderService {
         sb.append("- DYNAMIC MODALS: If you open a dialog (like 'Save As'), the OS spawns it as a completely new top-level window. If you can't find an element, use 'inspect_active' to see what is currently blocking the screen.\n");
         sb.append("- PRECISION INTERACTION: To interact with a UI element, read its BoundingRectangle [x, y, width, height], calculate its exact center point (x + width/2, y + height/2), and use 'desktop_automation' (move, click, type) with those exact integer coordinates.\n");
         sb.append("- TEXT ENTRY: Prefer using the 'type' or 'press' actions in 'desktop_automation' after clicking to focus an input field. Use 'press' for keyboard shortcuts.\n\n");
-        
-        java.util.Map<String, String> memories = memoryService.retrieveAll();
-        if (!memories.isEmpty()) {
-            sb.append("Long-term Memory:\n");
-            for (java.util.Map.Entry<String, String> entry : memories.entrySet()) {
-                sb.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
-            }
-            sb.append("\n");
-        }
-
-        sb.append("Current Environment:\n");
-        sb.append("Recent Environment Changes:\n");
-        sb.append(stateDelta);
-        sb.append("\n\n");
-        sb.append("- Active application: ")
-                .append(worldState.activeApplication())
-                .append("\n");
-        sb.append("- Active window: ")
-                .append(worldState.activeWindow())
-                .append("\n\n");
-
         sb.append("You are the reasoning component of MARK, an autonomous agent. ");
         sb.append("Select the BEST tool for the active step using the provided function schemas.\n\n");
         sb.append("STRICT TOOL CONTRACTS & VERIFICATION RULES:\n");
@@ -321,10 +300,19 @@ public class AgentPromptBuilderService {
         sb.append("- WHATSAPP STATUS POSTING: When posting photo or video status, ALWAYS pass 'file_path' with the exact local path to the image/video file or image directory. For text status, pass 'message'.\n");
         sb.append("- If inspect_ui fails or returns insufficient data, use 'screenshot' as a fallback to capture what is on screen.\n");
         sb.append("- OPENING WINDOWS APPS: To open desktop applications (e.g. Notepad, Calculator), call 'execute_command' with command 'notepad' or 'calc', or launch via Run dialog. Never use 'desktop_automation' to start an unlaunched application.\n");
-        sb.append("- COUNTING / LISTING FILES: To count or list files and images in a folder, call 'list_directory' with the directory path. Never use 'desktop_automation' to inspect directories.\n");
+        sb.append("- COUNTING / LISTING FILES: To count or list files and images in a folder, call 'list_directory' with the directory path. Never use 'desktop_automation' to inspect directories.\n\n");
+
+        java.util.Map<String, String> memories = memoryService.retrieveAll();
+        if (!memories.isEmpty()) {
+            sb.append("Long-term Memory:\n");
+            for (java.util.Map.Entry<String, String> entry : memories.entrySet()) {
+                sb.append("- ").append(entry.getKey()).append(": ").append(entry.getValue()).append("\n");
+            }
+            sb.append("\n");
+        }
 
         if (plan != null && !plan.isEmpty()) {
-            sb.append("\nYour Execution Plan:\n");
+            sb.append("Your Execution Plan:\n");
             for (int i = 0; i < plan.size(); i++) {
                 int pNum = i + 1;
                 if (pNum == currentStepNumber) {
@@ -337,9 +325,20 @@ public class AgentPromptBuilderService {
             }
             if (currentStepNumber <= plan.size()) {
                 sb.append("\nCURRENT ACTIVE STEP: ").append(plan.get(currentStepNumber - 1)).append("\n");
-                sb.append("CRITICAL: You MUST execute ONLY the tool and action needed for this CURRENT ACTIVE STEP. Do NOT skip ahead to other steps, do NOT bypass session opening/initialization steps, and do NOT repeat failed calls with identical arguments.\n");
+                sb.append("CRITICAL: You MUST execute ONLY the tool and action needed for this CURRENT ACTIVE STEP. Do NOT skip ahead to other steps, do NOT bypass session opening/initialization steps, and do NOT repeat failed calls with identical arguments.\n\n");
             }
         }
+
+        sb.append("Current Environment:\n");
+        sb.append("Recent Environment Changes:\n");
+        sb.append(stateDelta);
+        sb.append("\n\n");
+        sb.append("- Active application: ")
+                .append(worldState.activeApplication())
+                .append("\n");
+        sb.append("- Active window: ")
+                .append(worldState.activeWindow())
+                .append("\n");
 
         return sb.toString();
     }
