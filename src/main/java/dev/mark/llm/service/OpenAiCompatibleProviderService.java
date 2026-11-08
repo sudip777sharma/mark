@@ -322,13 +322,45 @@ public class OpenAiCompatibleProviderService implements LlmProviderService {
             try {
                 String jsonBlock = extractJson(fullContent);
                 com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(jsonBlock);
-            com.fasterxml.jackson.databind.JsonNode stepsNode = root.path("steps");
+                com.fasterxml.jackson.databind.JsonNode stepsNode = root.path("steps");
 
-            if (stepsNode.isArray()) {
-                for (com.fasterxml.jackson.databind.JsonNode n : stepsNode) {
-                    steps.add(n.asText());
+                if (stepsNode.isArray()) {
+                    for (com.fasterxml.jackson.databind.JsonNode n : stepsNode) {
+                        String stepText = "";
+                        if (n.isTextual()) {
+                            stepText = n.asText();
+                        } else if (n.isObject()) {
+                            if (n.has("description") && !n.get("description").asText().isBlank()) {
+                                stepText = n.get("description").asText();
+                            } else if (n.has("step") && !n.get("step").asText().isBlank()) {
+                                stepText = n.get("step").asText();
+                            } else if (n.has("action")) {
+                                String tool = n.has("tool") ? n.get("tool").asText() : (n.has("toolName") ? n.get("toolName").asText() : "");
+                                String act = n.get("action").asText();
+                                StringBuilder sb = new StringBuilder();
+                                if (!tool.isBlank()) sb.append(tool).append(" ");
+                                sb.append("action '").append(act).append("'");
+                                if (n.has("contact")) {
+                                    sb.append(" contact='").append(n.get("contact").asText()).append("'");
+                                }
+                                if (n.has("message")) {
+                                    sb.append(" message='").append(n.get("message").asText()).append("'");
+                                }
+                                if (n.has("args")) {
+                                    sb.append(" args=").append(n.get("args").toString());
+                                }
+                                stepText = sb.toString().trim();
+                            } else {
+                                stepText = n.toString();
+                            }
+                        } else {
+                            stepText = n.asText();
+                        }
+                        if (stepText != null && !stepText.trim().isBlank()) {
+                            steps.add(stepText.trim());
+                        }
+                    }
                 }
-            }
             } catch (Exception e) {
                 log.warn("Failed to parse plan JSON: {}. Using line-by-line fallback.", e.getMessage());
                 for (String line : fullContent.split("\n")) {

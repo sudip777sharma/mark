@@ -327,7 +327,25 @@ public class GeminiLlmProviderService implements LlmProviderService {
             List<String> steps = new ArrayList<>();
             if (stepsNode.isArray()) {
                 for (JsonNode n : stepsNode) {
-                    steps.add(n.asText());
+                    String stepText = "";
+                    if (n.isTextual()) {
+                        stepText = n.asText();
+                    } else if (n.isObject()) {
+                        if (n.has("description") && !n.get("description").asText().isBlank()) {
+                            stepText = n.get("description").asText();
+                        } else if (n.has("step") && !n.get("step").asText().isBlank()) {
+                            stepText = n.get("step").asText();
+                        } else if (n.has("action")) {
+                            stepText = "Execute " + n.path("tool").asText("") + " action: " + n.get("action").asText();
+                        } else {
+                            stepText = n.toString();
+                        }
+                    } else {
+                        stepText = n.asText();
+                    }
+                    if (stepText != null && !stepText.trim().isBlank()) {
+                        steps.add(stepText.trim());
+                    }
                 }
             }
             log.info("<<< [GEMINI:PLAN:RES] model={} durationMs={} stepsCount={}", model, duration, steps.size());
@@ -366,25 +384,38 @@ public class GeminiLlmProviderService implements LlmProviderService {
             if (msg.content() != null && !msg.content().isBlank()) {
                 parts.add(Part.builder().text(msg.content()).build());
             }
-            for (LlmToolCallDTO toolCall : msg.toolCalls()) {
-                Part.Builder partBuilder = Part.builder()
-                        .functionCall(FunctionCall.builder()
-                                .id(toolCall.id())
-                                .name(toolCall.name())
-                                .args(toolCall.arguments())
-                                .build());
-                if (toolCall.metadata().containsKey("gemini.thoughtSignature")) {
-                    partBuilder.thoughtSignature((byte[]) toolCall.metadata().get("gemini.thoughtSignature"));
+            if (msg.toolCalls() != null) {
+                for (LlmToolCallDTO toolCall : msg.toolCalls()) {
+                    if (toolCall == null) continue;
+                    Part.Builder partBuilder = Part.builder()
+                            .functionCall(FunctionCall.builder()
+                                    .id(toolCall.id() != null ? toolCall.id() : java.util.UUID.randomUUID().toString())
+                                    .name(toolCall.name() != null ? toolCall.name() : "unknown_tool")
+                                    .args(toolCall.arguments() != null ? toolCall.arguments() : Map.of())
+                                    .build());
+                    if (toolCall.metadata() != null && toolCall.metadata().containsKey("gemini.thoughtSignature")) {
+                        Object sig = toolCall.metadata().get("gemini.thoughtSignature");
+                        if (sig instanceof byte[] bytes) {
+                            partBuilder.thoughtSignature(bytes);
+                        }
+                    }
+                    parts.add(partBuilder.build());
                 }
-                parts.add(partBuilder.build());
             }
             return Content.builder().role("model").parts(parts).build();
         } else if ("tool".equals(msg.role())) {
             LlmToolObservationDTO obs = msg.toolObservation();
-            Map<String, Object> respMap = Map.of("result", obs.observation(), "error", !obs.successful());
+            Map<String, Object> respMap = new java.util.HashMap<>();
+            respMap.put("result", (obs != null && obs.observation() != null) ? obs.observation() : "");
+            respMap.put("error", obs == null || !obs.successful());
+            if (obs != null && obs.metadata() != null && !obs.metadata().isEmpty()) {
+                respMap.put("data", obs.metadata());
+            }
+            String toolCallId = (obs != null && obs.toolCallId() != null) ? obs.toolCallId() : java.util.UUID.randomUUID().toString();
+            String toolName = (obs != null && obs.toolName() != null) ? obs.toolName() : "unknown_tool";
             return Content.builder().role("user").parts(List.of(
                 Part.builder().functionResponse(
-                    FunctionResponse.builder().id(obs.toolCallId()).name(obs.toolName()).response(respMap).build()
+                    FunctionResponse.builder().id(toolCallId).name(toolName).response(respMap).build()
                 ).build()
             )).build();
         }

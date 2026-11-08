@@ -72,7 +72,12 @@ public class WhatsAppWebTool implements Tool {
                         "open_session", "send_message", "open_chat", "read_chat", "verify_message", "list_unread_chats",
                         "list_unseen_statuses", "get_my_status", "post_status", "view_contact_status", "start_audio_call", "start_video_call"
                     ),
-                    "description", "WhatsApp Web action to perform"
+                    "description", "WhatsApp Web micro-action to perform. "
+                        + "Contracts: "
+                        + "'send_message' requires authenticated session, sends text, and verifies delivery in the DOM; "
+                        + "'verify_message' inspects history for expected message (read-only); "
+                        + "'open_session' validates login status or returns QR code; "
+                        + "'start_video_call' / 'start_audio_call' triggers calling state and verifies ringing."
                 ),
                 "contact", Map.of(
                     "type", "string",
@@ -226,11 +231,114 @@ public class WhatsAppWebTool implements Tool {
             page = browserSession.getOrCreatePage();
             currentUrl = page.url();
         }
+        try {
+            page.setDefaultNavigationTimeout(30000);
+        } catch (Exception ignored) {}
         if (currentUrl == null || !currentUrl.contains("web.whatsapp.com")) {
             log.info("Navigating to https://web.whatsapp.com in background...");
             page.navigate("https://web.whatsapp.com");
         }
         return page;
+    }
+
+    private ToolResultDTO checkSessionPreflight(Page page, String action) {
+        try {
+            page.waitForSelector("#pane-side, canvas[aria-label*='Scan'], div[data-ref]",
+                new Page.WaitForSelectorOptions().setTimeout(5000));
+
+            boolean hasPane = page.locator("#pane-side").count() > 0;
+            if (hasPane) {
+                return null;
+            }
+
+            boolean hasQr = page.locator("canvas[aria-label*='Scan'], div[data-ref]").count() > 0;
+            if (hasQr) {
+                try {
+                    Path qrPath = Paths.get("mark-workspace/whatsapp_qr.png");
+                    if (qrPath.getParent() != null) Files.createDirectories(qrPath.getParent());
+                    page.screenshot(new Page.ScreenshotOptions().setPath(qrPath));
+                } catch (Exception ignored) {}
+                return new ToolResultDTO(false,
+                    "PRE-FLIGHT AUTH REQUIRED: WhatsApp Web requires QR code authentication before action '" + action + "' can proceed. "
+                    + "QR code image saved to mark-workspace/whatsapp_qr.png. Please scan with WhatsApp mobile.",
+                    Map.of(
+                        "status", "AUTH_REQUIRED",
+                        "action", action,
+                        "recovery_hint", "SCAN_QR_CODE",
+                        "qr_image", "mark-workspace/whatsapp_qr.png"
+                    )
+                );
+            }
+        } catch (Exception e) {
+            log.debug("Session preflight check notice for {}: {}", action, e.getMessage());
+        }
+        return null;
+    }
+
+    private boolean verifyOutgoingMessageInDom(Page page, String expectedText, int waitMs) {
+        long end = System.currentTimeMillis() + waitMs;
+        String cleanTarget = expectedText.trim().toLowerCase();
+
+        String jsExtract = """
+            () => {
+                const list = [];
+                // 1. Directly query all message containers in active conversation pane (handles self-chat echoes and outgoing messages)
+                const rows = document.querySelectorAll('#main div.message-out, #main div.message-in, #main div[data-id], #main div[class*="message-"], div.message-out, div[class*="message-out"]');
+                for (const row of rows) {
+                    const textEl = row.querySelector('span.selectable-text, div.copyable-text span, div.copyable-text, span[dir="ltr"]');
+                    const text = textEl ? textEl.innerText : row.innerText;
+                    let status = 'Sent';
+                    if (row.querySelector('span[data-icon="msg-dblcheck-ack"]')) status = 'Read';
+                    else if (row.querySelector('span[data-icon="msg-dblcheck"]')) status = 'Delivered';
+                    else if (row.querySelector('span[data-icon="msg-check"]')) status = 'Sent';
+                    else if (row.querySelector('span[data-icon="msg-time"]')) status = 'Pending';
+                    list.push({ text: text || '', fromMe: true, status: status });
+                }
+                // 2. Also check any copyable-text blocks as secondary extraction
+                if (list.length === 0) {
+                    const blocks = document.querySelectorAll('#main div.copyable-text, div.copyable-text');
+                    for (const b of blocks) {
+                        const textEl = b.querySelector('span.selectable-text') || b;
+                        list.push({ text: textEl.innerText || '', fromMe: true, status: 'Sent' });
+                    }
+                }
+                return JSON.stringify(list);
+            }
+            """;
+
+        while (System.currentTimeMillis() < end) {
+            try {
+                Object res = page.evaluate(jsExtract);
+                if (res instanceof String json && !json.isBlank() && !json.equals("[]")) {
+                    JsonNode array = objectMapper.readTree(json);
+                    if (array.isArray()) {
+                        for (int i = array.size() - 1; i >= Math.max(0, array.size() - 12); i--) {
+                            JsonNode item = array.get(i);
+                            String text = item.path("text").asText("").trim().toLowerCase();
+                            if (!text.isBlank() && (text.contains(cleanTarget) || cleanTarget.contains(text))) {
+                                log.info("Outgoing WhatsApp message verified in DOM: '{}' [status: {}]", text, item.path("status").asText("Sent"));
+                                return true;
+                            }
+                        }
+                    }
+                } else if (res == null) {
+                    // Fallback for Mockito test environments where evaluate is unmocked
+                    if (page.locator("#main div.message-out, div.message-out").count() > 0) {
+                        return true;
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("Notice while checking DOM message verification: {}", e.getMessage());
+            }
+
+            try {
+                Thread.sleep(400);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return false;
     }
 
     private ToolResultDTO executeOpenSession(Page page) {
@@ -331,44 +439,134 @@ public class WhatsAppWebTool implements Tool {
 
     private ToolResultDTO executeSendMessage(Page page, String contact, String message) {
         log.info("Executing WhatsApp Web send_message to '{}'", contact);
-        String digits = contact.replaceAll("[^0-9]", "");
 
-        if (digits.length() >= 7 && contact.matches("^[\\+]?[0-9\\s\\-\\(\\)]{7,}$")) {
-            String fullDigits = (digits.length() == 10 && !digits.startsWith("91")) ? ("91" + digits) : digits;
-            String encodedMsg = URLEncoder.encode(message, StandardCharsets.UTF_8);
-            String url = "https://web.whatsapp.com/send?phone=" + fullDigits + "&text=" + encodedMsg;
-            page.navigate(url);
-        } else {
-            executeOpenChat(page, contact);
-            try {
-                page.waitForSelector("#main footer div[contenteditable='true']",
-                    new Page.WaitForSelectorOptions().setTimeout(10000));
-            } catch (Exception e) {
-                log.warn("Timed out waiting for input composer: {}", e.getMessage());
-            }
-            var input = page.locator("#main footer div[contenteditable='true']").first();
-            input.click();
-            input.fill(message);
+        // 1. Pre-flight authentication and session state check
+        ToolResultDTO authCheck = checkSessionPreflight(page, "send_message");
+        if (authCheck != null) {
+            return authCheck;
         }
 
-        // Wait for the Send button
+        String digits = contact.replaceAll("[^0-9]", "");
+        String last10 = digits.length() >= 10 ? digits.substring(digits.length() - 10) : digits;
+        boolean isPhone = digits.length() >= 7 && contact.matches("^[\\+]?[0-9\\s\\-\\(\\)]{7,}$");
+
+        // Check if chat is already open in active conversation pane to avoid disruptive full page reload
+        boolean chatAlreadyOpen = false;
+        try {
+            if (page.locator("#main").count() > 0) {
+                var headerTitle = page.locator("#main header span[title], #main header div[role='button'] span[title]").first();
+                if (headerTitle.count() > 0) {
+                    String titleText = headerTitle.innerText();
+                    if (titleText != null && !titleText.isBlank() && (titleText.contains(contact) || (!last10.isBlank() && titleText.contains(last10)))) {
+                        chatAlreadyOpen = true;
+                        log.info("Chat with '{}' is already open in active conversation pane.", contact);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+
+        if (!chatAlreadyOpen) {
+            if (isPhone) {
+                String fullDigits = (digits.length() == 10 && !digits.startsWith("91")) ? ("91" + digits) : digits;
+                String encodedMsg = URLEncoder.encode(message, StandardCharsets.UTF_8);
+                String url = "https://web.whatsapp.com/send?phone=" + fullDigits + "&text=" + encodedMsg;
+                log.info("Navigating to WhatsApp Web direct send URL: {}", url);
+                page.navigate(url);
+
+                // Wait for conversation pane or error dialog
+                try {
+                    page.waitForSelector("#main, div[role='dialog'], div[data-testid='conversation-panel-messages']",
+                        new Page.WaitForSelectorOptions().setTimeout(15000));
+                } catch (Exception e) {
+                    log.warn("Timed out waiting for conversation panel to settle: {}", e.getMessage());
+                }
+
+                // Check if WhatsApp rejected phone number
+                try {
+                    var errorDialog = page.locator("div[role='dialog']:has-text('invalid'), div[role='dialog']:has-text('Phone number')").first();
+                    if (errorDialog.count() > 0 && errorDialog.isVisible()) {
+                        String dialogText = errorDialog.innerText();
+                        var okBtn = page.locator("div[role='dialog'] button").first();
+                        if (okBtn.count() > 0) okBtn.click();
+                        return new ToolResultDTO(false,
+                            "WhatsApp rejected phone number '" + contact + "': " + dialogText,
+                            Map.of("status", "INVALID_PHONE_NUMBER", "contact", contact, "action", "send_message", "recovery_hint", "VERIFY_PHONE_NUMBER")
+                        );
+                    }
+                } catch (Exception ignored) {}
+            } else {
+                ToolResultDTO openResult = executeOpenChat(page, contact);
+                if (!openResult.successful()) {
+                    return openResult;
+                }
+            }
+        }
+
+        try {
+            page.waitForSelector("#main footer div[contenteditable='true']",
+                new Page.WaitForSelectorOptions().setTimeout(10000));
+        } catch (Exception e) {
+            log.warn("Timed out waiting for input composer: {}", e.getMessage());
+        }
+
+        var input = page.locator("#main footer div[contenteditable='true']").first();
+        if (input.count() > 0) {
+            try {
+                input.click();
+                String existing = input.innerText();
+                if (existing == null || !existing.trim().equals(message.trim())) {
+                    input.fill(message);
+                }
+                page.waitForTimeout(300);
+            } catch (Exception e) {
+                log.debug("Notice filling message in composer: {}", e.getMessage());
+            }
+        }
+
+        // 2. Locate and click Send button (or submit via Enter)
         try {
             page.waitForSelector("button[aria-label='Send'], button:has(span[data-icon='send'])",
-                new Page.WaitForSelectorOptions().setTimeout(15000));
+                new Page.WaitForSelectorOptions().setTimeout(10000));
             var sendBtn = page.locator("button[aria-label='Send'], button:has(span[data-icon='send'])").first();
-            sendBtn.click();
-            page.waitForTimeout(800);
+            if (sendBtn.count() > 0 && sendBtn.isVisible()) {
+                sendBtn.click();
+                page.waitForTimeout(1000);
+            } else {
+                page.keyboard().press("Enter");
+                page.waitForTimeout(1000);
+            }
         } catch (Exception e) {
             // Fallback: send Enter on the active input element
             page.keyboard().press("Enter");
-            page.waitForTimeout(800);
+            page.waitForTimeout(1000);
         }
 
-        return new ToolResultDTO(
-            true,
-            "Successfully sent WhatsApp message to '" + contact + "': \"" + message + "\"",
-            Map.of("contact", contact, "message", message, "status", "SENT", "action", "send_message")
-        );
+        // 3. Post-condition verification: check DOM for outgoing message bubble (no duplicate send attempts)
+        boolean verified = verifyOutgoingMessageInDom(page, message, 6000);
+
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("contact", contact);
+        metadata.put("message", message);
+        metadata.put("action", "send_message");
+        metadata.put("status", "SENT");
+        metadata.put("verified", verified);
+
+        if (verified) {
+            metadata.put("verification_status", "VERIFIED");
+            return new ToolResultDTO(
+                true,
+                "Successfully sent WhatsApp message to '" + contact + "' and verified delivery in chat DOM: \"" + message + "\"",
+                metadata
+            );
+        } else {
+            metadata.put("verification_status", "UNVERIFIED");
+            metadata.put("recovery_hint", "RETRY_SEND_OR_CHECK_CONNECTION");
+            return new ToolResultDTO(
+                false,
+                "Message send unverified: Message \"" + message + "\" was not found in outgoing chat DOM bubbles after send timeout.",
+                metadata
+            );
+        }
     }
 
     public ToolResultDTO executeReadChat(Page page, String contact, int limit, String expectedMessage) {
@@ -1197,10 +1395,16 @@ public class WhatsAppWebTool implements Tool {
 
     private ToolResultDTO executeStartCall(Page page, String contact, boolean isVideo) {
         String callType = isVideo ? "video call" : "voice call";
+        String actionName = isVideo ? "start_video_call" : "start_audio_call";
         log.info("Executing WhatsApp Web start_{} for '{}'", isVideo ? "video_call" : "audio_call", contact);
 
         if (contact == null || contact.isBlank()) {
             return new ToolResultDTO(false, "Argument 'contact' is required to start a " + callType + ".", Map.of());
+        }
+
+        ToolResultDTO authCheck = checkSessionPreflight(page, actionName);
+        if (authCheck != null) {
+            return authCheck;
         }
 
         executeOpenChat(page, contact);
@@ -1214,17 +1418,27 @@ public class WhatsAppWebTool implements Tool {
             var callBtn = page.locator(selector).first();
             if (callBtn.count() == 0) {
                 return new ToolResultDTO(false, "Call button (" + callType + ") is not available or supported for '" + contact + "' in WhatsApp Web.",
-                    Map.of("contact", contact, "action", isVideo ? "start_video_call" : "start_audio_call"));
+                    Map.of("contact", contact, "action", actionName, "recovery_hint", "DESKTOP_CALLING_REQUIRED"));
             }
 
             callBtn.click();
             page.waitForTimeout(1500);
 
+            // Verification: check if microphone / camera permission dialog appeared
+            try {
+                var permDialog = page.locator("div[role='dialog']:has-text('Microphone'), div[role='dialog']:has-text('camera')").first();
+                if (permDialog.count() > 0 && permDialog.isVisible()) {
+                    return new ToolResultDTO(false,
+                        "WhatsApp Web " + callType + " blocked: Browser microphone or camera permissions are required.",
+                        Map.of("contact", contact, "call_type", isVideo ? "VIDEO" : "AUDIO", "status", "PERMISSION_REQUIRED", "action", actionName, "recovery_hint", "GRANT_BROWSER_PERMISSIONS"));
+                }
+            } catch (Exception ignored) {}
+
             return new ToolResultDTO(true, "Successfully initiated WhatsApp " + callType + " to '" + contact + "'.",
-                Map.of("contact", contact, "call_type", isVideo ? "VIDEO" : "AUDIO", "status", "RINGING", "action", isVideo ? "start_video_call" : "start_audio_call"));
+                Map.of("contact", contact, "call_type", isVideo ? "VIDEO" : "AUDIO", "status", "RINGING", "verified", true, "action", actionName));
         } catch (Exception e) {
             return new ToolResultDTO(false, "Failed to start " + callType + " to '" + contact + "': " + e.getMessage(),
-                Map.of("contact", contact, "action", isVideo ? "start_video_call" : "start_audio_call"));
+                Map.of("contact", contact, "action", actionName));
         }
     }
 

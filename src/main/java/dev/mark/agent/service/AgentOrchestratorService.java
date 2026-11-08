@@ -264,8 +264,14 @@ public class AgentOrchestratorService {
         String activeStepText = (state.plan() != null && activePlanStep <= state.plan().size())
                 ? state.plan().get(activePlanStep - 1)
                 : "Continue execution.";
+        boolean isCompletionStep = activeStepText.toLowerCase().contains("complete")
+                || activePlanStep > (state.plan() != null ? state.plan().size() : 0);
+        String stepInstruction = isCompletionStep
+                ? "\nINSTRUCTION: Active Plan Step " + activePlanStep + " is TASK COMPLETION. All action steps are already finished and verified. You MUST call 'task_complete' with a concise summary of the results, or return your final answer directly WITHOUT calling any action tools. Do NOT repeat previous action tools."
+                : "\nINSTRUCTION: Execute ONLY the action required by Active Plan Step " + activePlanStep + ". If it specifies 'open_session', you MUST call 'open_session'. Do NOT skip to subsequent steps.";
         String userPrompt = "Overall Mission Goal: " + state.goal()
                 + "\nActive Plan Step " + activePlanStep + ": " + activeStepText
+                + stepInstruction
                 + "\nCRITICAL: Always use the exact folder paths, file names, contacts, and application names specified in the Overall Mission Goal. Never use placeholder or dummy paths.";
         LlmRequestDTO request = new LlmRequestDTO(
                 state.taskId(),
@@ -344,7 +350,8 @@ public class AgentOrchestratorService {
                     setAction(state, "Tool execution completed.");
 
                     String outcome = toolResult.successful() ? "Success" : "Failed";
-                    String details = toolResult.observation()
+                    String obsText = toolResult.observation() != null ? toolResult.observation() : "";
+                    String details = obsText
                             + (toolResult.metadata() != null && !toolResult.metadata().isEmpty()
                                     ? "\nData: " + toolResult.metadata()
                                     : "");
@@ -364,6 +371,28 @@ public class AgentOrchestratorService {
 
                     if (toolResult.successful() && !"task_complete".equals(toolCall.name()) && !"ask_user".equals(toolCall.name())) {
                         state.advancePlanIndex();
+                    }
+
+                    // Auto-complete if a verification tool confirmed success and no action steps remain
+                    if (toolResult.successful() && Boolean.TRUE.equals(toolResult.metadata().get("verified"))) {
+                        boolean onlyCompletionRemains = state.plan() == null
+                                || state.currentPlanIndex() >= state.plan().size()
+                                || (state.currentPlanIndex() == state.plan().size() - 1
+                                        && state.plan().get(state.currentPlanIndex()).toLowerCase().contains("complete"));
+                        if (onlyCompletionRemains) {
+                            log.info("=== [ORCHESTRATOR:AUTO_COMPLETE_VERIFIED] taskId={} Tool '{}' verified goal. Auto-completing task.",
+                                    state.taskId(), toolCall.name());
+                            state.setStatus("COMPLETED");
+                            String completionSummary = "Task successfully completed and verified: " + obsText;
+                            state.setFinalAnswer(completionSummary);
+                            for (LlmToolObservationDTO obs : observations) {
+                                state.addMessage(LlmMessageDTO.toolObservation(obs));
+                            }
+                            state.addStep(new AgentStepModel(stepNumber + 1, "Task Verified Complete", "task_complete", "{}",
+                                    completionSummary, response.provider(), java.time.Instant.now()));
+                            saveState(state);
+                            return;
+                        }
                     }
 
                     if ("task_complete".equals(toolCall.name()) && toolResult.successful()) {
@@ -449,10 +478,10 @@ public class AgentOrchestratorService {
                 for (LlmToolObservationDTO obs : observations) {
                     if (!obs.successful()) {
                         long failureCount = state.steps().stream()
-                                .filter(s -> obs.name().equals(s.toolName()) && s.outcome() != null && s.outcome().startsWith("Failed"))
+                                .filter(s -> obs.toolName().equals(s.toolName()) && s.outcome() != null && s.outcome().startsWith("Failed"))
                                 .count();
                         if (failureCount >= 2) {
-                            String guidance = "SYSTEM GUIDANCE: The tool '" + obs.name()
+                            String guidance = "SYSTEM GUIDANCE: The tool '" + obs.toolName()
                                     + "' has failed repeatedly. Do NOT call the exact same tool with identical arguments again. "
                                     + "Either try an alternative strategy/tool, verify required preconditions, or call 'ask_user' to explain the blocker and request guidance.";
                             log.info("--- [ORCHESTRATOR:GUIDANCE_INJECTED] taskId={} guidance='{}'", state.taskId(), guidance);
@@ -478,6 +507,22 @@ public class AgentOrchestratorService {
                 saveState(state);
 
             } else {
+                // If model returned empty content with no tools while plan steps remain, re-prompt specifically for the active step
+                if ((response.content() == null || response.content().isBlank())
+                        && state.plan() != null && activePlanStep <= state.plan().size()) {
+                    log.warn("--- [ORCHESTRATOR:EMPTY_LLM_RESPONSE] taskId={} step={} LLM returned empty response while step {} ('{}') is pending. Prompting retry...",
+                            state.taskId(), stepNumber, activePlanStep, activeStepText);
+                    LlmMessageDTO promptRetry = LlmMessageDTO.userMessage(
+                            "SYSTEM NOTICE: Your previous response was empty and called no tools. "
+                            + "Active Plan Step " + activePlanStep + ": '" + activeStepText + "' is NOT completed yet. "
+                            + "You MUST call the appropriate tool to execute Active Plan Step " + activePlanStep + " now.");
+                    state.addMessage(promptRetry);
+                    state.addStep(new AgentStepModel(stepNumber, "", "None", "",
+                            "Empty LLM response received while active step is pending; prompt retry injected.", response.provider(), java.time.Instant.now()));
+                    saveState(state);
+                    return;
+                }
+
                 // No tools called, agent believes it is done.
                 log.info("--- [ORCHESTRATOR:NO_TOOLS] taskId={} step={} agent returned direct completion",
                         state.taskId(), stepNumber);
@@ -525,6 +570,10 @@ public class AgentOrchestratorService {
                         e.getMessage());
                 handleFailure(state, "LLM Provider Error: " + e.getMessage());
             }
+        } catch (Exception e) {
+            log.error("!!! [ORCHESTRATOR:STEP_ERROR] taskId={} step={} unexpected error: {}", state.taskId(), stepNumber,
+                    e.getMessage(), e);
+            handleFailure(state, "Step execution error: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
         }
     }
 

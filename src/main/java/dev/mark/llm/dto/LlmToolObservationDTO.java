@@ -22,6 +22,15 @@ public record LlmToolObservationDTO(
         Map<String, Object> metadata
 ) {
     public LlmToolObservationDTO {
+        if (toolCallId == null) {
+            toolCallId = "";
+        }
+        if (toolName == null) {
+            toolName = "";
+        }
+        if (observation == null) {
+            observation = "";
+        }
         if (metadata == null) {
             metadata = Map.of();
         } else {
@@ -37,5 +46,12 @@ public record LlmToolObservationDTO(
                 "observation", observation,
                 "metadata", metadata
         );
+    }
+
+    /**
+     * Compatibility alias returning the tool name.
+     */
+    public String name() {
+        return toolName;
     }
 }

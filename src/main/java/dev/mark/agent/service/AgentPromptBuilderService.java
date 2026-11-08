@@ -253,11 +253,14 @@ public class AgentPromptBuilderService {
         sb.append("  * For generic GUI tasks: If no high-level tool exists, plan to use 'inspect_ui' and 'desktop_automation'.\n\n");
         sb.append("PHASE 2: DYNAMIC STRATEGY\n");
         sb.append("- Keep the plan minimal, direct, and concise (usually 1-3 direct steps when using specialized tools).\n");
+        sb.append("- NEVER add dummy completion steps like 'Mark the task as complete' or 'Finish task' into the plan. Plan ONLY the concrete action steps. The agent automatically completes when all action steps succeed.\n");
         sb.append("- PATH & PARAMETER SPECIFICITY: Always copy the exact directory paths, folder names, file names, contact numbers, and application names directly from the user's prompt into the plan steps. Never use vague phrases like 'the specified directory', 'the folder', or 'the contact'.\n");
         sb.append("- Do not break high-level tool operations into manual micro-steps like 'click search bar', 'type text', 'press enter'.\n\n");
         sb.append("PHASE 3: ACTIONABLE PLAN\n");
         sb.append("First, explain your decomposition and tool selection reasoning inside <thinking>...</thinking> tags.\n");
-        sb.append("Then output the final plan as a JSON object with a single key 'steps' containing an array of concise steps. Keep steps concise.");
+        sb.append("Then output the final plan as a JSON object with a single key 'steps' containing an array of concise descriptive string steps.\n");
+        sb.append("CRITICAL: Each item in 'steps' MUST be a plain string (NOT a nested JSON object). For example:\n");
+        sb.append("{\n  \"steps\": [\n    \"Check WhatsApp Web session and verify login status using whatsapp_web_automation action 'open_session'\",\n    \"Send message using whatsapp_web_automation action 'send_message' contact='8280901077' message='hi'\"\n  ]\n}\n");
         return sb.toString();
     }
 
@@ -298,12 +301,14 @@ public class AgentPromptBuilderService {
                 .append("\n\n");
 
         sb.append("You are the reasoning component of MARK, an autonomous agent. ");
-        sb.append("Select the BEST tool for the task. Available tools:\n");
-        for (Tool tool : toolRegistry.availableTools()) {
-            sb.append("- ").append(tool.name()).append(": ").append(tool.description()).append("\n");
-        }
+        sb.append("Select the BEST tool for the active step using the provided function schemas.\n\n");
+        sb.append("STRICT TOOL CONTRACTS & VERIFICATION RULES:\n");
+        sb.append("- MICRO-CONTRACTS: Every tool execution is a contract (Precondition -> Action -> Postcondition Verification).\n");
+        sb.append("- VERIFIED EVIDENCE: Never claim completion until tool observations confirm verified execution (e.g., status=VERIFIED, observable state changes, or output files).\n");
+        sb.append("- STRUCTURED RECOVERY: If a tool returns 'FAILED_POSTCONDITION' or includes a 'recovery_hint' (e.g. AUTH_REQUIRED, SCAN_QR_CODE, ELEMENT_BLOCKED), you MUST follow the suggested recovery path rather than repeating the identical failed tool call.\n");
+        sb.append("- SPECIALIZED DOMAIN PRIORITY: Always prefer specialized domain tools over generic clicks ('whatsapp_web_automation' for WhatsApp, 'screen_recorder' for video/audio, CLI commands for file/code).\n");
         sb.append("\nRules:\n");
-        sb.append("- Use ONLY the tools listed above. Never invent tools.\n");
+        sb.append("- Use ONLY the tools declared in function schemas. Never invent tools.\n");
         sb.append("- THOUGHT PROCESS: Before outputting any tool call, you MUST output a brief <thinking> block explaining your reasoning. For example:\n<thinking>I need to click the search bar, so I will use desktop_automation...</thinking>\nThen invoke the tool.\n");
         sb.append("- Match the task to the most specific tool. For file operations use read_file/write_file/list_directory.\n");
         sb.append("- **BATCHING**: Only batch sequential UI/keyboard actions (e.g., focus -> delay -> click -> delay -> type). Never output multiple file or execution operations in a single batch.\n");
@@ -332,7 +337,7 @@ public class AgentPromptBuilderService {
             }
             if (currentStepNumber <= plan.size()) {
                 sb.append("\nCURRENT ACTIVE STEP: ").append(plan.get(currentStepNumber - 1)).append("\n");
-                sb.append("CRITICAL: Execute ONLY the tool needed for this active step. Do NOT skip ahead to other steps or repeat failed calls.\n");
+                sb.append("CRITICAL: You MUST execute ONLY the tool and action needed for this CURRENT ACTIVE STEP. Do NOT skip ahead to other steps, do NOT bypass session opening/initialization steps, and do NOT repeat failed calls with identical arguments.\n");
             }
         }
 

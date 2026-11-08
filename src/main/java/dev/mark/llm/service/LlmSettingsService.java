@@ -188,7 +188,16 @@ public class LlmSettingsService {
         config.setProviderType(providerType);
         config.setActiveModel(activeModel);
         config.setBaseUrl(baseUrl);
-        config.setApiKeys(apiKeys);
+        List<ApiKeyEntry> deduplicatedKeys = new java.util.ArrayList<>();
+        if (apiKeys != null) {
+            java.util.Set<String> seenValues = new java.util.HashSet<>();
+            for (ApiKeyEntry key : apiKeys) {
+                if (key != null && key.getKeyValue() != null && seenValues.add(key.getKeyValue())) {
+                    deduplicatedKeys.add(key);
+                }
+            }
+        }
+        config.setApiKeys(deduplicatedKeys);
         config.setConfigured(isConfigured);
         
         if (isDefault) {
