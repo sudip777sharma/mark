@@ -258,7 +258,14 @@ public class WhatsAppWebTool implements Tool {
                     if (qrPath.getParent() != null) Files.createDirectories(qrPath.getParent());
                     page.screenshot(new Page.ScreenshotOptions().setPath(qrPath));
                 } catch (Exception ignored) {}
-                return new ToolResultDTO(false,
+                dev.mark.tool.dto.HumanInterventionRequest intervention = dev.mark.tool.dto.HumanInterventionRequest.qrScan(
+                    "WhatsApp Authentication Required",
+                    "WhatsApp Web requires QR code authentication before action '" + action + "' can proceed. Please scan the QR code using WhatsApp on your phone (Linked Devices).",
+                    "mark-workspace/whatsapp_qr.png",
+                    Map.of("action", action)
+                );
+                return dev.mark.tool.dto.ToolResultDTO.intervention(
+                    intervention,
                     "PRE-FLIGHT AUTH REQUIRED: WhatsApp Web requires QR code authentication before action '" + action + "' can proceed. "
                     + "QR code image saved to mark-workspace/whatsapp_qr.png. Please scan with WhatsApp mobile.",
                     Map.of(
@@ -409,7 +416,17 @@ public class WhatsAppWebTool implements Tool {
                 try {
                     page.screenshot(new Page.ScreenshotOptions().setPath(Paths.get("mark-workspace/whatsapp_qr.png")));
                 } catch (Exception ignored) {}
-                return new ToolResultDTO(false, "WhatsApp Web requires QR code authentication. The Chromium browser window is open on your screen (QR image also saved at mark-workspace/whatsapp_qr.png). Please scan the QR code with WhatsApp on your phone (Linked Devices) to pair.", Map.of("status", "QR_SCAN_REQUIRED", "action", "open_session", "qr_image", "mark-workspace/whatsapp_qr.png"));
+                dev.mark.tool.dto.HumanInterventionRequest intervention = dev.mark.tool.dto.HumanInterventionRequest.qrScan(
+                    "WhatsApp Authentication Required",
+                    "WhatsApp Web requires QR code authentication. Please scan the QR code with WhatsApp on your phone (Linked Devices) to pair.",
+                    "mark-workspace/whatsapp_qr.png",
+                    Map.of("action", "open_session")
+                );
+                return dev.mark.tool.dto.ToolResultDTO.intervention(
+                    intervention,
+                    "WhatsApp Web requires QR code authentication. The Chromium browser window is open on your screen (QR image also saved at mark-workspace/whatsapp_qr.png). Please scan the QR code with WhatsApp on your phone (Linked Devices) to pair.",
+                    Map.of("status", "QR_SCAN_REQUIRED", "action", "open_session", "qr_image", "mark-workspace/whatsapp_qr.png")
+                );
             }
 
             return new ToolResultDTO(true, "WhatsApp Web page loaded (initializing session).", Map.of("status", "INITIALIZING", "action", "open_session"));
@@ -552,6 +569,29 @@ public class WhatsAppWebTool implements Tool {
                 if (!openResult.successful()) {
                     return openResult;
                 }
+            }
+        }
+
+        // Check if authentication or QR code is required when not in active chat/session
+        if (page.locator("#main, #pane-side").count() == 0) {
+            boolean hasQrInChat = page.locator("canvas[aria-label*='Scan'], div[data-ref], [data-testid='qrcode']").count() > 0;
+            if (hasQrInChat) {
+                try {
+                    Path qrPath = Paths.get("mark-workspace/whatsapp_qr.png");
+                    if (qrPath.getParent() != null) Files.createDirectories(qrPath.getParent());
+                    page.screenshot(new Page.ScreenshotOptions().setPath(qrPath));
+                } catch (Exception ignored) {}
+                dev.mark.tool.dto.HumanInterventionRequest intervention = dev.mark.tool.dto.HumanInterventionRequest.qrScan(
+                    "WhatsApp Authentication Required",
+                    "WhatsApp Web requires QR code authentication before sending messages. Please scan the QR code using WhatsApp on your phone (Linked Devices).",
+                    "mark-workspace/whatsapp_qr.png",
+                    Map.of("action", "send_message", "contact", contact)
+                );
+                return dev.mark.tool.dto.ToolResultDTO.intervention(
+                    intervention,
+                    "PRE-FLIGHT AUTH REQUIRED: WhatsApp Web requires QR code authentication before action 'send_message' can proceed. QR code image saved to mark-workspace/whatsapp_qr.png. Please scan with WhatsApp mobile.",
+                    Map.of("status", "AUTH_REQUIRED", "action", "send_message", "recovery_hint", "SCAN_QR_CODE", "qr_image", "mark-workspace/whatsapp_qr.png")
+                );
             }
         }
 

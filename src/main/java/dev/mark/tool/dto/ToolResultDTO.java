@@ -7,7 +7,7 @@ import java.util.Map;
  * Represents an immutable Data Transfer Object (DTO) that encapsulates the outcome of a tool's execution.
  *
  * **2. Why it is useful:**
- * Standardizes tool execution responses across the application, ensuring thread safety and immutability of metadata while providing a clean API for success states.
+ * Standardizes tool execution responses across the application, ensuring thread safety and immutability of metadata while providing a clean API for success states and typed human intervention requests.
  *
  * **3. How it fits in the flow:**
  * Acts as the return payload from tool execution components back to the orchestrator or LLM agent, signaling the result of an action.
@@ -16,14 +16,30 @@ import java.util.Map;
  * - `successful`: Boolean flag indicating if the tool executed without errors.
  * - `observation`: String containing the primary output or message from the tool.
  * - `metadata`: Map containing auxiliary contextual data.
- * - `ToolResultDTO(...)` (Constructor): Compact constructor that enforces immutability by creating an unmodifiable copy of the metadata.
- * - `success(String)`: Static factory method to quickly instantiate a successful result with empty metadata.
- *
- * **5. Logic and overall fit:**
- * The internal logic guarantees data integrity through defensive copying of metadata. In the overall application logic, callers inspect the `successful` flag to determine flow control, while the `observation` is typically fed back to the LLM or user.
+ * - `interventionRequest`: Optional typed HumanInterventionRequest when human involvement is needed.
+ * - `ToolResultDTO(...)`: Canonical constructor enforcing immutability.
+ * - `success(String)`: Static factory method for successful result.
+ * - `intervention(...)`: Static factory method for requesting human action.
  */
+public record ToolResultDTO(
+    boolean successful,
+    String observation,
+    Map<String, Object> metadata,
+    HumanInterventionRequest interventionRequest
+) {
+    public ToolResultDTO {
+        metadata = metadata != null ? Map.copyOf(metadata) : Map.of();
+    }
 
-public record ToolResultDTO(boolean successful, String observation, Map<String, Object> metadata) {
-    public ToolResultDTO { metadata = Map.copyOf(metadata); }
-    public static ToolResultDTO success(String observation) { return new ToolResultDTO(true, observation, Map.of()); }
+    public ToolResultDTO(boolean successful, String observation, Map<String, Object> metadata) {
+        this(successful, observation, metadata, null);
+    }
+
+    public static ToolResultDTO success(String observation) {
+        return new ToolResultDTO(true, observation, Map.of(), null);
+    }
+
+    public static ToolResultDTO intervention(HumanInterventionRequest intervention, String observation, Map<String, Object> metadata) {
+        return new ToolResultDTO(false, observation, metadata, intervention);
+    }
 }

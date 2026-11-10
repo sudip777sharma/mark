@@ -46,7 +46,12 @@ public class AskUserTool implements Tool {
     @Override
     public ToolResultDTO execute(ToolRequestDTO request) {
         String q = extractQuestion(request.arguments());
-        return new ToolResultDTO(true, "Execution paused. Waiting for user reply.", Map.of("question", q));
+        dev.mark.tool.dto.HumanInterventionRequest intervention = dev.mark.tool.dto.HumanInterventionRequest.clarification(
+            "User Guidance Required",
+            q,
+            request.arguments() != null ? request.arguments() : Map.of()
+        );
+        return dev.mark.tool.dto.ToolResultDTO.intervention(intervention, "Execution paused. Waiting for user reply.", Map.of("question", q));
     }
 
     public static String extractQuestion(Map<String, Object> arguments) {

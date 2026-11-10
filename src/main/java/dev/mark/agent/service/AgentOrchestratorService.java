@@ -80,6 +80,8 @@ public class AgentOrchestratorService {
     private final ToolRegistry toolRegistry;
     private final MeterRegistry meterRegistry;
     private final dev.mark.llm.service.LlmSettingsService llmSettingsService;
+    private final dev.mark.skill.service.L0SkillEngine l0SkillEngine;
+    private final dev.mark.trajectory.service.TrajectoryRecorderService trajectoryRecorderService;
 
     public AgentOrchestratorService(dev.mark.preference.UserPreferenceService userPreferenceService,
             LlmRouterService llmRouter,
@@ -91,7 +93,9 @@ public class AgentOrchestratorService {
             AgentEnvironmentDeltaService deltaService,
             AgentToolExecutorService toolExecutor,
             ToolRegistry toolRegistry, MeterRegistry meterRegistry,
-            dev.mark.llm.service.LlmSettingsService llmSettingsService) {
+            dev.mark.llm.service.LlmSettingsService llmSettingsService,
+            dev.mark.skill.service.L0SkillEngine l0SkillEngine,
+            dev.mark.trajectory.service.TrajectoryRecorderService trajectoryRecorderService) {
         this.userPreferenceService = userPreferenceService;
         this.llmRouter = llmRouter;
         this.taskRepository = taskRepository;
@@ -105,6 +109,8 @@ public class AgentOrchestratorService {
         this.toolExecutor = toolExecutor;
         this.toolRegistry = toolRegistry;
         this.meterRegistry = meterRegistry;
+        this.l0SkillEngine = l0SkillEngine;
+        this.trajectoryRecorderService = trajectoryRecorderService;
     }
 
     public Map<UUID, CompletableFuture<String>> getPendingReplies() {
@@ -129,6 +135,89 @@ public class AgentOrchestratorService {
                 .orElse(null);
 
         AgentStateModel state = new AgentStateModel(taskId, goal, configId);
+        state.setStatus("EXECUTING");
+        setAction(state, "Executing Ultra Instinct Tier-0 Skill: " + goal);
+
+        // Tier-0 Ultra Instinct Fast-Path Execution (< 50ms, 0 LLM calls)
+        java.util.Optional<dev.mark.skill.dto.SkillExecutionResult> l0Result = l0SkillEngine.tryExecute(taskId, goal);
+        if (l0Result.isPresent()) {
+            dev.mark.skill.dto.SkillExecutionResult res = l0Result.get();
+            for (dev.mark.agent.model.AgentStepModel step : res.steps()) {
+                state.addStep(step);
+            }
+            if (res.success()) {
+                state.setStatus("COMPLETED");
+                state.setFinalAnswer(res.summary());
+                state.setPlan(java.util.List.of("1. Execute Tier-0 Ultra Instinct skill", "2. Verify DOM delivery"));
+                saveState(state);
+                log.info("=== [ORCHESTRATOR:L0_SUCCESS] taskId={} Instant completion without LLM overhead", taskId);
+                long duration = java.time.Duration.between(state.createdAt(), java.time.Instant.now()).toMillis();
+                trajectoryRecorderService.recordTrajectory(
+                        taskId,
+                        goal,
+                        null,
+                        state.steps().stream().map(dev.mark.agent.model.AgentStepModel::toolName).toList(),
+                        java.util.Map.of(),
+                        true,
+                        duration,
+                        0
+                );
+                sample.stop(meterRegistry.timer("agent.task.duration"));
+                return response(state);
+            } else if (res.intervention() != null) {
+                dev.mark.tool.dto.HumanInterventionRequest intervention = res.intervention();
+                String displayTitle = "[" + intervention.type() + "] " + intervention.title();
+                String prompt = intervention.prompt();
+                if (intervention.mediaUri() != null) {
+                    prompt = prompt + " (Media: " + intervention.mediaUri() + ")";
+                }
+                String currentActionText = displayTitle + ": " + prompt;
+                state.setStatus("NEEDS_INPUT");
+                setAction(state, currentActionText);
+
+                UUID taskUuid = UUID.fromString(state.taskId());
+                taskRepository.findById(taskUuid).ifPresent(t -> {
+                    t.setStatus(dev.mark.agent.model.AgentStatusModel.NEEDS_INPUT);
+                    t.setCurrentAction(currentActionText);
+                    taskRepository.save(t);
+                    taskSseService.broadcastTaskUpdate(t);
+                });
+
+                CompletableFuture<String> replyFuture = new CompletableFuture<>();
+                pendingReplies.put(taskUuid, replyFuture);
+
+                try {
+                    String userReply = replyFuture.get(10, java.util.concurrent.TimeUnit.MINUTES);
+                    log.info("=== [ORCHESTRATOR:USER_REPLIED_TO_L0] taskId={} reply='{}'", taskId, userReply);
+                    java.util.Optional<dev.mark.skill.dto.SkillExecutionResult> retryResult = l0SkillEngine.tryExecute(taskId, goal);
+                    if (retryResult.isPresent() && retryResult.get().success()) {
+                        for (dev.mark.agent.model.AgentStepModel step : retryResult.get().steps()) {
+                            state.addStep(step);
+                        }
+                        state.setStatus("COMPLETED");
+                        state.setFinalAnswer(retryResult.get().summary());
+                        saveState(state);
+                        long duration = java.time.Duration.between(state.createdAt(), java.time.Instant.now()).toMillis();
+                        trajectoryRecorderService.recordTrajectory(
+                                taskId,
+                                goal,
+                                null,
+                                state.steps().stream().map(dev.mark.agent.model.AgentStepModel::toolName).toList(),
+                                java.util.Map.of(),
+                                true,
+                                duration,
+                                0
+                        );
+                        sample.stop(meterRegistry.timer("agent.task.duration"));
+                        return response(state);
+                    }
+                } catch (Exception e) {
+                    pendingReplies.remove(taskUuid);
+                    log.error("=== [ORCHESTRATOR:L0_INTERVENTION_ERROR] taskId={}", taskId, e);
+                }
+            }
+        }
+
         state.setStatus("PLANNING");
 
         try {
@@ -199,6 +288,19 @@ public class AgentOrchestratorService {
         }
 
         log.info("=== [ORCHESTRATOR:FINISHED] taskId={} status={}", taskId, state.status());
+        if ("COMPLETED".equals(state.status())) {
+            long duration = java.time.Duration.between(state.createdAt(), java.time.Instant.now()).toMillis();
+            trajectoryRecorderService.recordTrajectory(
+                    state.taskId(),
+                    state.goal(),
+                    null,
+                    state.steps().stream().map(dev.mark.agent.model.AgentStepModel::toolName).toList(),
+                    java.util.Map.of(),
+                    true,
+                    duration,
+                    state.llmRequestCount()
+            );
+        }
         return response(state);
     }
 
@@ -412,16 +514,31 @@ public class AgentOrchestratorService {
                         }
                     }
 
-                    if ("ask_user".equals(toolCall.name())) {
-                        String question = dev.mark.tool.impl.system.AskUserTool.extractQuestion(toolCall.arguments());
-                        log.info("=== [ORCHESTRATOR:WAITING_USER_INPUT] taskId={} question='{}'", state.taskId(), question);
+                    if (toolResult.interventionRequest() != null || "ask_user".equals(toolCall.name())) {
+                        dev.mark.tool.dto.HumanInterventionRequest intervention = toolResult.interventionRequest();
+                        String prompt;
+                        String displayTitle;
+                        if (intervention != null) {
+                            prompt = intervention.prompt();
+                            displayTitle = "[" + intervention.type() + "] " + intervention.title();
+                            if (intervention.mediaUri() != null) {
+                                prompt = prompt + " (Media: " + intervention.mediaUri() + ")";
+                            }
+                        } else {
+                            prompt = dev.mark.tool.impl.system.AskUserTool.extractQuestion(toolCall.arguments());
+                            displayTitle = "[CLARIFICATION] Guidance Needed";
+                        }
+
+                        log.info("=== [ORCHESTRATOR:WAITING_USER_INPUT] taskId={} title='{}' prompt='{}'",
+                                state.taskId(), displayTitle, prompt);
                         state.setStatus("NEEDS_INPUT");
-                        setAction(state, "Waiting for user input: " + question);
+                        String currentActionText = displayTitle + ": " + prompt;
+                        setAction(state, currentActionText);
 
                         UUID taskUuid = UUID.fromString(state.taskId());
                         taskRepository.findById(taskUuid).ifPresent(t -> {
                             t.setStatus(dev.mark.agent.model.AgentStatusModel.NEEDS_INPUT);
-                            t.setCurrentAction(question);
+                            t.setCurrentAction(currentActionText);
                             taskRepository.save(t);
                             taskSseService.broadcastTaskUpdate(t);
                         });
@@ -433,7 +550,8 @@ public class AgentOrchestratorService {
                             String userReply = replyFuture.get(10, java.util.concurrent.TimeUnit.MINUTES);
                             log.info("=== [ORCHESTRATOR:USER_REPLIED] taskId={} reply='{}'", state.taskId(), userReply);
                             details = "User provided response: " + userReply;
-                            observation = new LlmToolObservationDTO(toolCall.id(), toolCall.name(), true, details, Map.of("reply", userReply));
+                            observation = new LlmToolObservationDTO(toolCall.id(), toolCall.name(), true, details,
+                                    Map.of("reply", userReply, "intervention_completed", true));
                             observations.set(observations.size() - 1, observation);
 
                             state.setStatus("EXECUTING");
