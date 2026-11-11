@@ -38,7 +38,9 @@ public class BrowserSession implements AutoCloseable {
             java.nio.file.Files.createDirectories(java.nio.file.Paths.get(userDataDir));
             
             BrowserType.LaunchPersistentContextOptions pOptions = new BrowserType.LaunchPersistentContextOptions()
-                    .setHeadless(userPreferenceService.getBoolean("browser.headless", properties.headless()));
+                    .setHeadless(userPreferenceService.getBoolean("browser.headless", properties.headless()))
+                    .setArgs(java.util.List.of("--start-maximized", "--window-position=0,0", "--no-sandbox"))
+                    .setViewportSize(null);
             
             this.browserContext = playwright.chromium().launchPersistentContext(Paths.get(userDataDir), pOptions);
         } catch (Exception e) {
@@ -75,6 +77,11 @@ public class BrowserSession implements AutoCloseable {
                 this.currentPage = !pages.isEmpty() ? pages.get(0) : browserContext.newPage();
                 this.currentPage.setDefaultTimeout(userPreferenceService.getInt("browser.timeoutMs", properties.timeoutMs()));
             }
+            if (this.currentPage != null && !this.currentPage.isClosed()) {
+                try {
+                    this.currentPage.bringToFront();
+                } catch (Exception ignored) {}
+            }
             return this.currentPage;
         } catch (Exception e) {
             log.warn("event=browser_page_failed_reconnecting error={}", e.getMessage());
@@ -82,6 +89,11 @@ public class BrowserSession implements AutoCloseable {
             java.util.List<Page> pages = browserContext.pages();
             this.currentPage = !pages.isEmpty() ? pages.get(0) : browserContext.newPage();
             this.currentPage.setDefaultTimeout(userPreferenceService.getInt("browser.timeoutMs", properties.timeoutMs()));
+            if (this.currentPage != null && !this.currentPage.isClosed()) {
+                try {
+                    this.currentPage.bringToFront();
+                } catch (Exception ignored) {}
+            }
             return this.currentPage;
         }
     }

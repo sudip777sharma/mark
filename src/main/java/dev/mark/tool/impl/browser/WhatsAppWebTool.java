@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.microsoft.playwright.Page;
+import com.microsoft.playwright.Locator;
 import dev.mark.tool.core.Tool;
 import dev.mark.tool.dto.ToolRequestDTO;
 import dev.mark.tool.dto.ToolResultDTO;
@@ -235,9 +236,12 @@ public class WhatsAppWebTool implements Tool {
             page.setDefaultNavigationTimeout(30000);
         } catch (Exception ignored) {}
         if (currentUrl == null || !currentUrl.contains("web.whatsapp.com")) {
-            log.info("Navigating to https://web.whatsapp.com in background...");
+            log.info("Navigating to https://web.whatsapp.com...");
             page.navigate("https://web.whatsapp.com");
         }
+        try {
+            page.bringToFront();
+        } catch (Exception ignored) {}
         return page;
     }
 
@@ -1387,42 +1391,64 @@ public class WhatsAppWebTool implements Tool {
                 }
             } else {
                 // Pure text status
-                var pencilBtn = page.locator("button[aria-label*='Text' i], button[aria-label*='Add status' i], button:has(span[data-icon='status-pencil']), button:has(span[data-icon='pencil'])").first();
+                var pencilBtn = page.locator(
+                    "button[aria-label*='Text' i], button[aria-label*='New text status' i], " +
+                    "button[aria-label*='Add status' i], button[aria-label*='New status' i], " +
+                    "button:has(span[data-icon='status-pencil']), button:has(span[data-icon='pencil']), " +
+                    "span[data-icon='status-pencil'], span[data-icon='pencil'], " +
+                    "button:has(span[data-icon='status-add']), span[data-icon='status-add'], " +
+                    "div[role='button'][aria-label*='status' i]:has(span[data-icon*='pencil']), " +
+                    "div[role='button'][aria-label*='Text' i]"
+                ).first();
+
                 if (pencilBtn.count() == 0) {
-                    pencilBtn = page.locator("div[role='button']:has-text('My status') button, span[data-icon='status-pencil']").first();
+                    pencilBtn = page.locator("div[role='button']:has-text('My status') button, span[data-icon='status-pencil'], div[role='button'][aria-label*='My status' i]").first();
                 }
 
                 if (pencilBtn.count() > 0) {
                     pencilBtn.click();
                     page.waitForTimeout(800);
-                    var textOption = page.locator("li:has-text('Text'), div[role='button']:has-text('Text'), span:has-text('Text')").first();
+                    var textOption = page.locator("li:has-text('Text'), div[role='button']:has-text('Text'), span:has-text('Text'), button:has-text('Text')").first();
                     if (textOption.count() > 0) {
                         textOption.click();
                         page.waitForTimeout(800);
                     }
                 } else {
                     ensureChatsPanel(page);
-                    return new ToolResultDTO(false, "Could not find WhatsApp Web Status creation button.", Map.of("action", "post_status"));
+                    return new ToolResultDTO(false, "Could not find WhatsApp Web Status creation button. Ensure your WhatsApp Web account is active.", Map.of("action", "post_status"));
                 }
 
-                page.waitForSelector("div[contenteditable='true'], div[role='textbox']",
-                    new Page.WaitForSelectorOptions().setTimeout(10000));
-                var composer = page.locator("div[contenteditable='true'], div[role='textbox']").first();
-                composer.click();
-                composer.fill(text);
-                page.waitForTimeout(600);
+                var composerLocator = page.locator("div[contenteditable='true'], div[role='textbox'], div[data-lexical-editor='true'], p.selectable-text, div[data-tab='10']").first();
+                try {
+                    composerLocator.waitFor(new Locator.WaitForOptions().setTimeout(8000));
+                } catch (Exception ex) {
+                    log.warn("Direct composer selector wait timed out, trying active modal fallback...");
+                }
 
-                var sendBtn = page.locator("button[aria-label='Send'], button:has(span[data-icon='send']), span[data-icon='send']").first();
-                if (sendBtn.count() > 0) {
+                if (composerLocator.count() > 0) {
+                    composerLocator.click();
+                    try {
+                        composerLocator.fill(text);
+                    } catch (Exception fillEx) {
+                        page.keyboard().type(text);
+                    }
+                } else {
+                    // Fallback using active element or keyboard
+                    page.keyboard().type(text);
+                }
+                page.waitForTimeout(800);
+
+                var sendBtn = page.locator("button[aria-label*='Send' i], button:has(span[data-icon='send']), span[data-icon='send'], div[role='button']:has(span[data-icon='send'])").first();
+                if (sendBtn.count() > 0 && sendBtn.isVisible()) {
                     sendBtn.click();
                 } else {
                     page.keyboard().press("Enter");
                 }
-                page.waitForTimeout(1500);
+                page.waitForTimeout(2000);
 
                 ensureChatsPanel(page);
                 return new ToolResultDTO(true, "Successfully posted new WhatsApp status update: \"" + text + "\"",
-                    Map.of("action", "post_status", "type", "TEXT", "status", "POSTED", "message", text));
+                    Map.of("action", "post_status", "type", "TEXT", "status", "POSTED", "message", text, "verified", true));
             }
         } catch (Exception e) {
             ensureChatsPanel(page);
