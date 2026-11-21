@@ -1530,8 +1530,6 @@ public class WhatsAppWebTool implements Tool {
                 } else {
                     page.keyboard().press("Enter");
                 }
-                    page.keyboard().press("Enter");
-                }
                 page.waitForTimeout(2000);
 
                 Map<String, Object> metadata = new HashMap<>();
