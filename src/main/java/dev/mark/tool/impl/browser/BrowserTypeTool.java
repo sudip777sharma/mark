@@ -46,8 +46,37 @@ public class BrowserTypeTool implements Tool {
             return new ToolResultDTO(false, "No active browser page. Use browser_navigate first.", Map.of());
         }
 
-        String selector = (String) request.arguments().get("selector");
-        String text = (String) request.arguments().get("text");
+        Map<String, Object> args = request.arguments();
+        String selector = (String) args.get("selector");
+        if (selector == null || selector.isBlank()) {
+            selector = (String) args.get("input_selector");
+        }
+        if (selector == null || selector.isBlank()) {
+            selector = (String) args.get("input_field");
+        }
+        if (selector == null || selector.isBlank()) {
+            selector = (String) args.get("field");
+        }
+        if (selector == null || selector.isBlank()) {
+            selector = (String) args.get("element");
+        }
+        if (selector == null || selector.isBlank()) {
+            selector = (String) args.get("target");
+        }
+
+        String text = (String) args.get("text");
+        if (text == null) {
+            text = (String) args.get("value");
+        }
+        if (text == null) {
+            text = (String) args.get("input_value");
+        }
+        if (text == null) {
+            text = (String) args.get("input");
+        }
+        if (text == null) {
+            text = (String) args.get("content");
+        }
 
         if (selector == null || selector.isBlank() || text == null) {
             return new ToolResultDTO(false, "Missing required arguments 'selector' or 'text'", Map.of());
@@ -56,10 +85,20 @@ public class BrowserTypeTool implements Tool {
         try {
             var page = browserSession.getCurrentPage();
             
+            String targetSelector = selector;
+            if (!selector.startsWith("#") && !selector.startsWith(".") && !selector.startsWith("[") && !selector.contains(" ")) {
+                if (page.locator(selector).count() == 0) {
+                    var alt = page.locator("input[name='" + selector + "'], input[id='" + selector + "'], input[placeholder*='" + selector + "' i], textarea[name='" + selector + "']");
+                    if (alt.count() > 0) {
+                        targetSelector = "input[name='" + selector + "'], input[id='" + selector + "'], input[placeholder*='" + selector + "' i], textarea[name='" + selector + "']";
+                    }
+                }
+            }
+
             // Wait for element
-            page.waitForSelector(selector, new com.microsoft.playwright.Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.VISIBLE));
+            page.waitForSelector(targetSelector, new com.microsoft.playwright.Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.VISIBLE));
             
-            page.fill(selector, text);
+            page.fill(targetSelector, text);
             
             try { Thread.sleep(500); } catch (Exception ignored) {}
             

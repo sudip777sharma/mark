@@ -80,6 +80,13 @@ export const taskApi = {
     if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to submit reply`);
   },
 
+  async stopTask(taskId: string): Promise<void> {
+    const res = await fetch(`${API_BASE}/${taskId}/stop`, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: Failed to stop task`);
+  },
+
   async approveTask(taskId: string): Promise<void> {
     const res = await fetch(`${API_BASE}/${taskId}/approve`, {
       method: 'POST',

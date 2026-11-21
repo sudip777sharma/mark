@@ -1477,20 +1477,20 @@ public class WhatsAppWebTool implements Tool {
 
                 if (pencilBtn.count() > 0) {
                     pencilBtn.click();
-                    page.waitForTimeout(800);
-                    var textOption = page.locator("li:has-text('Text'), div[role='button']:has-text('Text'), span:has-text('Text'), button:has-text('Text')").first();
-                    if (textOption.count() > 0) {
+                    page.waitForTimeout(1000);
+                    var textOption = page.locator("div[role='menu'] li:has-text('Text'), div[role='menu'] div[role='button']:has-text('Text'), div[data-animate-dropdown-item='true']:has-text('Text'), div[role='menuitem']:has-text('Text'), li:has-text('Text'), div[role='button']:has-text('Text')").first();
+                    if (textOption.count() > 0 && textOption.isVisible()) {
                         textOption.click();
-                        page.waitForTimeout(800);
+                        page.waitForTimeout(1000);
                     }
                 } else {
                     ensureChatsPanel(page);
                     return new ToolResultDTO(false, "Could not find WhatsApp Web Status creation button. Ensure your WhatsApp Web account is active.", Map.of("action", "post_status"));
                 }
 
-                var composerLocator = page.locator("div[contenteditable='true'], div[role='textbox'], div[data-lexical-editor='true'], p.selectable-text, div[data-tab='10']").first();
+                var composerLocator = page.locator("div[contenteditable='true'], div[role='textbox'], div[data-lexical-editor='true'], p.selectable-text, div[data-tab='10'], div[data-tab='6'], div[data-tab='1']").first();
                 try {
-                    composerLocator.waitFor(new Locator.WaitForOptions().setTimeout(8000));
+                    composerLocator.waitFor(new Locator.WaitForOptions().setTimeout(10000));
                 } catch (Exception ex) {
                     log.warn("Direct composer selector wait timed out: {}", ex.getMessage());
                 }

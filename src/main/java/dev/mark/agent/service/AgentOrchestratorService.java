@@ -66,6 +66,7 @@ public class AgentOrchestratorService {
     private static final Logger log = LoggerFactory.getLogger(AgentOrchestratorService.class);
 
     private final Map<UUID, CompletableFuture<String>> pendingReplies = new ConcurrentHashMap<>();
+    private final java.util.Set<UUID> cancelledTasks = ConcurrentHashMap.newKeySet();
 
     private final LlmRouterService llmRouter;
     private final TaskRepository taskRepository;
@@ -124,6 +125,43 @@ public class AgentOrchestratorService {
             return true;
         }
         return false;
+    }
+
+    public boolean stopTask(UUID taskId) {
+        log.info(">>> [ORCHESTRATOR:STOP_TASK] taskId={}", taskId);
+        cancelledTasks.add(taskId);
+
+        CompletableFuture<String> future = pendingReplies.remove(taskId);
+        if (future != null) {
+            future.completeExceptionally(new java.util.concurrent.CancellationException("Task stopped by user"));
+        }
+
+        taskRepository.findById(taskId).ifPresent(task -> {
+            if (task.getStatus() == dev.mark.agent.model.AgentStatusModel.PLANNING
+                    || task.getStatus() == dev.mark.agent.model.AgentStatusModel.EXECUTING
+                    || task.getStatus() == dev.mark.agent.model.AgentStatusModel.NEEDS_INPUT
+                    || task.getStatus() == dev.mark.agent.model.AgentStatusModel.COOLDOWN
+                    || task.getStatus() == dev.mark.agent.model.AgentStatusModel.QUOTA_EXHAUSTED) {
+                task.setStatus(dev.mark.agent.model.AgentStatusModel.FAILED);
+                task.setCurrentAction("Task was manually stopped by user.");
+                task.setFinalAnswer("Execution stopped by user.");
+                taskRepository.save(task);
+                taskSseService.broadcastTaskUpdate(task);
+            }
+        });
+        return true;
+    }
+
+    public boolean isTaskCancelled(UUID taskId) {
+        return cancelledTasks.contains(taskId);
+    }
+
+    private void handleCancellation(AgentStateModel state) {
+        log.info("=== [ORCHESTRATOR:CANCELLED] taskId={}", state.taskId());
+        state.setStatus("FAILED");
+        state.setFinalAnswer("Execution stopped by user.");
+        setAction(state, "Task was manually stopped by user.");
+        saveState(state);
     }
 
     private TaskResponseDTO finishSkillExecution(AgentStateModel state,
@@ -295,6 +333,10 @@ public class AgentOrchestratorService {
 
             while ("EXECUTING".equals(state.status()) || "COOLDOWN".equals(state.status())
                     || "QUOTA_EXHAUSTED".equals(state.status())) {
+                if (isTaskCancelled(UUID.fromString(taskId))) {
+                    handleCancellation(state);
+                    break;
+                }
                 if ("COOLDOWN".equals(state.status()) || "QUOTA_EXHAUSTED".equals(state.status())) {
                     boolean isDailyQuota = "QUOTA_EXHAUSTED".equals(state.status());
                     consecutiveRateLimits++;
@@ -348,6 +390,7 @@ public class AgentOrchestratorService {
             return handleFailure(state, failureMessage(e));
         } finally {
             sample.stop(meterRegistry.timer("agent.task.duration"));
+            cancelledTasks.remove(UUID.fromString(taskId));
         }
 
         log.info("=== [ORCHESTRATOR:FINISHED] taskId={} status={}", taskId, state.status());
@@ -405,6 +448,11 @@ public class AgentOrchestratorService {
     }
 
     private void executeNextStep(AgentStateModel state) {
+        if (isTaskCancelled(UUID.fromString(state.taskId()))) {
+            handleCancellation(state);
+            return;
+        }
+
         if (state.steps().size() >= userPreferenceService.getInt("agent.maxSteps", properties.maxSteps())) {
             log.warn("!!! [ORCHESTRATOR:MAX_STEPS] taskId={} reached max steps limit={}", state.taskId(),
                     userPreferenceService.getInt("agent.maxSteps", properties.maxSteps()));
@@ -468,6 +516,12 @@ public class AgentOrchestratorService {
                 String unverifiedSideEffect = null;
 
                 for (LlmToolCallDTO toolCall : response.toolCalls()) {
+                    if (isTaskCancelled(UUID.fromString(state.taskId()))) {
+                        shouldAbortBatch = true;
+                        handleCancellation(state);
+                        break;
+                    }
+
                     if (shouldAbortBatch) {
                         log.info(
                                 "--- [ORCHESTRATOR:TOOL_SKIPPED] taskId={} step={} tool={} reason='Aborted due to previous failure or UI transition'",

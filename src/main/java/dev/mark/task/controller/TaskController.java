@@ -96,6 +96,13 @@ public class TaskController {
         }
     }
 
+    @PostMapping("/{taskId}/stop")
+    @ResponseStatus(HttpStatus.OK)
+    public void stopTask(@PathVariable UUID taskId) {
+        log.info(">>> [TASK:STOP_REQUESTED] taskId={}", taskId);
+        agentEngine.stopTask(taskId);
+    }
+
     private TaskResponseDTO mapToResponse(TaskEntity entity) {
         List<AgentStepModel> steps = entity.getSteps().stream()
                 .map(s -> new AgentStepModel(s.getStepNumber(), s.getDescription(), s.getToolName(), s.getToolArguments(), s.getOutcome(), s.getProvider(), s.getTimestamp()))

@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useAgentStore } from '../../store/agentStore';
 import { taskApi } from '../../api/taskClient';
-import { Send, Cpu, Loader2 } from 'lucide-react';
+import { Send, Cpu, Loader2, Square } from 'lucide-react';
 
 export const GoalPromptBar: React.FC = () => {
   const [goal, setGoal] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
+  const activeTask = useAgentStore((s) => s.activeTask);
+  const isStreaming = useAgentStore((s) => s.isStreaming);
 
   const activeProvider = useAgentStore((s) => s.activeProvider);
   const activeModel = useAgentStore((s) => s.activeModel);
@@ -98,6 +101,41 @@ export const GoalPromptBar: React.FC = () => {
     }
   };
 
+  
+  const isRunning = isStreaming || activeTask?.status === 'EXECUTING' || activeTask?.status === 'PLANNING' || activeTask?.status === 'COOLDOWN' || activeTask?.status === 'NEEDS_INPUT';
+
+  const handleStopTask = async () => {
+    const taskId = activeTask?.taskId || activeTask?.id;
+    if (!taskId || isStopping) return;
+
+    setIsStopping(true);
+    addRawLog({ level: 'WARN', message: `Stopping task ${taskId}...` });
+    try {
+      await taskApi.stopTask(taskId);
+      setIsStreaming(false);
+      if (activeTask) {
+        setActiveTask({
+          ...activeTask,
+          status: 'FAILED',
+          currentAction: 'Task was manually stopped by user.',
+          finalAnswer: 'Execution stopped by user.'
+        });
+      }
+      addStreamLog({
+        id: 'stop-' + Date.now(),
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'task:failed',
+        title: 'Task Stopped',
+        detail: 'Task execution stopped by user.'
+      });
+    } catch (err: any) {
+      console.error('Failed to stop task:', err);
+      addRawLog({ level: 'ERROR', message: `Failed to stop task: ${err?.message || err}` });
+    } finally {
+      setIsStopping(false);
+    }
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     if (!goal.trim() || isSubmitting) return;
@@ -168,6 +206,76 @@ export const GoalPromptBar: React.FC = () => {
         backdropFilter: 'blur(12px)',
       }}
     >
+            {isRunning && activeTask && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 14px',
+            marginBottom: '10px',
+            borderRadius: '10px',
+            background: 'rgba(239, 68, 68, 0.08)',
+            border: '1px solid rgba(239, 68, 68, 0.25)',
+            boxShadow: '0 0 15px rgba(239, 68, 68, 0.1)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', overflow: 'hidden' }}>
+            <div
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: '#ef4444',
+                boxShadow: '0 0 8px #ef4444',
+                animation: 'pulseGlow 1.5s infinite',
+                flexShrink: 0,
+              }}
+            />
+            <span style={{ fontSize: '11px', fontWeight: 700, color: '#f87171', letterSpacing: '0.5px', flexShrink: 0 }}>
+              RUNNING TASK:
+            </span>
+            <span
+              style={{
+                fontSize: '13px',
+                fontWeight: 500,
+                color: 'var(--text-primary)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+              title={activeTask.goal}
+            >
+              {activeTask.goal}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleStopTask}
+            disabled={isStopping}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              borderRadius: '8px',
+              background: '#ef4444',
+              color: '#ffffff',
+              border: 'none',
+              fontSize: '12px',
+              fontWeight: 600,
+              cursor: isStopping ? 'default' : 'pointer',
+              boxShadow: '0 0 12px rgba(239, 68, 68, 0.4)',
+              transition: 'var(--transition-fast)',
+              flexShrink: 0,
+            }}
+          >
+            {isStopping ? <Loader2 size={13} className="animate-spin" /> : <Square size={13} fill="#ffffff" />}
+            <span>{isStopping ? 'Stopping...' : 'Stop Task'}</span>
+          </button>
+        </div>
+      )}
       <div
         className="glass-panel"
         style={{
@@ -284,6 +392,35 @@ export const GoalPromptBar: React.FC = () => {
             padding: '4px 0',
           }}
         />
+
+                {isRunning && activeTask && (
+          <button
+            type="button"
+            onClick={handleStopTask}
+            disabled={isStopping}
+            title="Stop the current running task"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
+              padding: '0 12px',
+              height: '36px',
+              borderRadius: '8px',
+              background: '#ef4444',
+              color: '#ffffff',
+              cursor: isStopping ? 'default' : 'pointer',
+              border: 'none',
+              fontWeight: 600,
+              fontSize: '12px',
+              transition: 'var(--transition-fast)',
+              boxShadow: '0 0 12px rgba(239, 68, 68, 0.35)',
+            }}
+          >
+            {isStopping ? <Loader2 size={14} className="animate-spin" /> : <Square size={14} fill="#ffffff" />}
+            <span>Stop</span>
+          </button>
+        )}
 
         {/* Submit button */}
         <button

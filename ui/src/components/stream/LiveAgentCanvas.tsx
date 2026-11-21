@@ -16,6 +16,8 @@ import {
   Send,
   Check,
   Code,
+  Square,
+  Loader2,
 } from 'lucide-react';
 
 const AnimatedEllipsis: React.FC = () => {
@@ -32,15 +34,51 @@ const AnimatedEllipsis: React.FC = () => {
 
 export const LiveAgentCanvas: React.FC = () => {
   const activeTask = useAgentStore((s) => s.activeTask);
+  const setActiveTask = useAgentStore((s) => s.setActiveTask);
   const streamLogs = useAgentStore((s) => s.streamLogs);
   const activePlan = useAgentStore((s) => s.activePlan);
   const isStreaming = useAgentStore((s) => s.isStreaming);
+  const setIsStreaming = useAgentStore((s) => s.setIsStreaming);
+  const addStreamLog = useAgentStore((s) => s.addStreamLog);
+  const addRawLog = useAgentStore((s) => s.addRawLog);
   const llmThoughtStream = useAgentStore((s) => s.llmThoughtStream);
   const waitingUserInput = useAgentStore((s) => s.waitingUserInput);
   const setWaitingUserInput = useAgentStore((s) => s.setWaitingUserInput);
-  const setActiveTask = useAgentStore((s) => s.setActiveTask);
-  const addStreamLog = useAgentStore((s) => s.addStreamLog);
   const llmInteractionLogs = useAgentStore((s) => s.llmInteractionLogs);
+
+  const [isStopping, setIsStopping] = React.useState(false);
+
+  const handleStopTask = async () => {
+    const taskId = activeTask?.taskId || activeTask?.id;
+    if (!taskId || isStopping) return;
+
+    setIsStopping(true);
+    addRawLog({ level: 'WARN', message: `Stopping task ${taskId}...` });
+    try {
+      await taskApi.stopTask(taskId);
+      setIsStreaming(false);
+      if (activeTask) {
+        setActiveTask({
+          ...activeTask,
+          status: 'FAILED',
+          currentAction: 'Task was manually stopped by user.',
+          finalAnswer: 'Execution stopped by user.'
+        });
+      }
+      addStreamLog({
+        id: 'stop-' + Date.now(),
+        timestamp: new Date().toLocaleTimeString(),
+        type: 'task:failed',
+        title: 'Task Stopped',
+        detail: 'Task execution stopped by user.'
+      });
+    } catch (err: any) {
+      console.error('Failed to stop task:', err);
+      addRawLog({ level: 'ERROR', message: `Failed to stop task: ${err?.message || err}` });
+    } finally {
+      setIsStopping(false);
+    }
+  };
 
   const [humanReplyText, setHumanReplyText] = React.useState('');
   const [isSubmittingReply, setIsSubmittingReply] = React.useState(false);
@@ -215,7 +253,32 @@ export const LiveAgentCanvas: React.FC = () => {
           </h2>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {(isStreaming || activeTask.status === 'EXECUTING' || activeTask.status === 'PLANNING' || activeTask.status === 'COOLDOWN' || activeTask.status === 'NEEDS_INPUT') && (
+            <button
+              onClick={handleStopTask}
+              disabled={isStopping}
+              title="Stop this task immediately"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '9999px',
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid #ef4444',
+                color: '#ef4444',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: isStopping ? 'default' : 'pointer',
+                transition: 'var(--transition-fast)',
+                boxShadow: '0 0 10px rgba(239, 68, 68, 0.25)',
+              }}
+            >
+              {isStopping ? <Loader2 size={13} className="animate-spin" /> : <Square size={12} fill="#ef4444" />}
+              <span>{isStopping ? 'Stopping...' : 'Stop Task'}</span>
+            </button>
+          )}
           {activeTask.llmRequestCount !== undefined && activeTask.llmRequestCount > 0 && (
             <div
               style={{
