@@ -12,6 +12,7 @@ import dev.mark.tool.dto.ToolResultDTO;
 import dev.mark.tool.registry.ToolRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -30,6 +31,7 @@ public class AgentToolExecutorService {
     private final SecurityPolicyService securityPolicyService;
     private final AgentSafetyService legacySafetyService;
 
+    @Autowired
     public AgentToolExecutorService(
             ToolRegistry toolRegistry,
             ToolContractRegistry contractRegistry,
