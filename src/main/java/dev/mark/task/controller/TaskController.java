@@ -78,19 +78,21 @@ public class TaskController {
     @PostMapping("/{taskId}/reply")
     @ResponseStatus(HttpStatus.OK)
     public void replyToTask(@PathVariable UUID taskId, @RequestBody String reply) {
-        log.info(">>> [TASK:REPLY_RECEIVED] taskId={} reply='{}'", taskId, reply);
+        log.info(">>> [TASK:REPLY_RECEIVED] taskId={}", taskId);
         boolean delivered = agentEngine.submitReply(taskId, reply);
         if (!delivered) {
-            log.warn("--- [TASK:NO_PENDING_REPLY] taskId={} had no waiting reply future; self-healing orphaned task", taskId);
+            log.warn("--- [TASK:NO_PENDING_REPLY] taskId={} has no active execution waiting for a reply", taskId);
             taskRepository.findById(taskId).ifPresent(task -> {
                 if (task.getStatus() == dev.mark.agent.model.AgentStatusModel.NEEDS_INPUT) {
-                    task.setStatus(dev.mark.agent.model.AgentStatusModel.COMPLETED);
-                    task.setCurrentAction("User reply recorded: " + reply);
-                    task.setFinalAnswer(reply);
+                    task.setStatus(dev.mark.agent.model.AgentStatusModel.FAILED);
+                    task.setCurrentAction("The reply arrived after task execution ended. Start a new task to continue.");
+                    task.setFinalAnswer("Task was not resumed because no execution was waiting for the reply.");
                     taskRepository.save(task);
                     taskSseService.broadcastTaskUpdate(task);
                 }
             });
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "No active task execution is waiting for a reply. The task was not marked complete.");
         }
     }
 

@@ -3,8 +3,12 @@ package dev.mark.task.controller;
 import dev.mark.agent.dto.InteractionRequestDTO;
 import dev.mark.agent.dto.InteractionResponseDTO;
 import dev.mark.agent.model.AgentStatusModel;
+import dev.mark.agent.model.AgentVerificationResultModel;
+import dev.mark.agent.model.AgentWorldStateModel;
+import dev.mark.agent.service.AgentCompletionVerifierService;
 import dev.mark.agent.service.AgentIntentRouterService;
 import dev.mark.agent.service.AgentOrchestratorService;
+import dev.mark.llm.dto.LlmMessageDTO;
 import dev.mark.task.service.TaskSseService;
 import dev.mark.task.entity.TaskEntity;
 import dev.mark.task.repository.TaskRepository;
@@ -36,6 +40,7 @@ public class InteractionController {
 
     private final AgentIntentRouterService intentRouter;
     private final AgentOrchestratorService agentEngine;
+    private final AgentCompletionVerifierService completionVerifier;
     private final TaskRepository taskRepository;
     private final TaskSseService taskSseService;
     private final dev.mark.task.repository.InteractionMessageRepository interactionRepository;
@@ -44,12 +49,14 @@ public class InteractionController {
     public InteractionController(
             AgentIntentRouterService intentRouter,
             AgentOrchestratorService agentEngine,
+            AgentCompletionVerifierService completionVerifier,
             TaskRepository taskRepository,
             TaskSseService taskSseService,
             dev.mark.task.repository.InteractionMessageRepository interactionRepository,
             @org.springframework.beans.factory.annotation.Qualifier("agentTaskExecutor") java.util.concurrent.Executor agentTaskExecutor) {
         this.intentRouter = intentRouter;
         this.agentEngine = agentEngine;
+        this.completionVerifier = completionVerifier;
         this.taskRepository = taskRepository;
         this.taskSseService = taskSseService;
         this.interactionRepository = interactionRepository;
@@ -80,9 +87,16 @@ public class InteractionController {
                 TaskEntity t = taskRepository.findById(taskId).orElse(null);
                 if (t == null) return;
 
-                if (routing.intent() == dev.mark.agent.model.AgentIntentType.AUTONOMOUS_TASK) {
+                AgentVerificationResultModel directVerification = routing.intent() == dev.mark.agent.model.AgentIntentType.AUTONOMOUS_TASK
+                        ? AgentVerificationResultModel.failure("Intent router selected autonomous execution.")
+                        : completionVerifier.verify(userInput,
+                                java.util.List.of(LlmMessageDTO.assistantCompletion(routing.reply())),
+                                AgentWorldStateModel.empty());
+                if (routing.intent() == dev.mark.agent.model.AgentIntentType.AUTONOMOUS_TASK || !directVerification.verified()) {
                     t.setStatus(AgentStatusModel.PLANNING);
-                    t.setCurrentAction("Intent classified as Autonomous Task. Generating execution plan...");
+                    t.setCurrentAction(routing.intent() == dev.mark.agent.model.AgentIntentType.AUTONOMOUS_TASK
+                            ? "Intent classified as Autonomous Task. Generating execution plan..."
+                            : "Direct answer lacked sufficient evidence. Starting tool-backed execution...");
                     taskRepository.save(t);
                     taskSseService.broadcastTaskUpdate(t);
                     

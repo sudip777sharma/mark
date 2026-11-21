@@ -126,6 +126,93 @@ public class AgentOrchestratorService {
         return false;
     }
 
+    private TaskResponseDTO finishSkillExecution(AgentStateModel state,
+            dev.mark.skill.dto.SkillExecutionResult result, Timer.Sample sample) {
+        AgentVerificationResultModel verification = completionVerifier.verifySkill(
+                state.goal(), result, state.latestWorldState());
+        boolean verified = verification.verified();
+        state.setStatus(verified ? "COMPLETED" : "FAILED");
+        state.setFinalAnswer(verified
+                ? result.summary()
+                : "Action was attempted, but its result could not be verified: " + verification.reason());
+        state.addStep(new AgentStepModel(state.steps().size() + 1,
+                verified ? "Deterministic skill result verified" : "Deterministic skill result not verified",
+                "completion_verifier", "", verification.reason(), "MARK", java.time.Instant.now()));
+        state.setPlan(java.util.List.of("Execute deterministic skill", "Verify the requested outcome"));
+        saveState(state);
+        recordSkillTrajectory(state, verified);
+        sample.stop(meterRegistry.timer("agent.task.duration"));
+        return response(state);
+    }
+
+    private TaskResponseDTO finishUnverifiedSkillAction(AgentStateModel state,
+            dev.mark.skill.dto.SkillExecutionResult result, Timer.Sample sample) {
+        state.setStatus("FAILED");
+        state.setFinalAnswer("The WhatsApp action may have been submitted, but MARK could not verify its result. "
+                + "Check WhatsApp before retrying. " + result.summary());
+        state.addStep(new AgentStepModel(state.steps().size() + 1, "External action requires manual verification",
+                "completion_verifier", "", result.summary(), "MARK", java.time.Instant.now()));
+        saveState(state);
+        recordSkillTrajectory(state, false);
+        sample.stop(meterRegistry.timer("agent.task.duration"));
+        return response(state);
+    }
+
+    private boolean mayHavePerformedExternalAction(dev.mark.skill.dto.SkillExecutionResult result) {
+        String action = String.valueOf(result.evidence().get("action"));
+        return "send_message".equals(action) || "post_status".equals(action)
+                || Boolean.TRUE.equals(result.evidence().get("submitted"));
+    }
+
+    private String unverifiedSideEffectWarning(LlmToolObservationDTO observation) {
+        Map<String, Object> metadata = observation.metadata();
+        String action = String.valueOf(metadata.get("action"));
+        boolean unverified = Boolean.FALSE.equals(metadata.get("verified"))
+                || "UNVERIFIED".equalsIgnoreCase(String.valueOf(metadata.get("verification_status")));
+        boolean mayHaveSentMessage = "send_message".equals(action)
+                && "SENT".equalsIgnoreCase(String.valueOf(metadata.get("status"))) && unverified;
+        boolean mayHavePostedStatus = "post_status".equals(action)
+                && (Boolean.TRUE.equals(metadata.get("submitted"))
+                        || "SUBMITTED_UNVERIFIED".equalsIgnoreCase(String.valueOf(metadata.get("status"))))
+                && unverified;
+        if (mayHaveSentMessage || mayHavePostedStatus) {
+            return "A WhatsApp action may have happened, but MARK could not verify it. The task was stopped to prevent a duplicate; check WhatsApp before retrying.";
+        }
+        return null;
+    }
+
+    private void recordSkillTrajectory(AgentStateModel state, boolean verified) {
+        long duration = java.time.Duration.between(state.createdAt(), java.time.Instant.now()).toMillis();
+        trajectoryRecorderService.recordTrajectory(
+                state.taskId(), state.goal(), null,
+                state.steps().stream().map(dev.mark.agent.model.AgentStepModel::toolName).toList(),
+                java.util.Map.of(), verified, duration, 0);
+    }
+
+    private boolean verifyAndComplete(AgentStateModel state, String summary, String provider, int stepNumber) {
+        List<LlmMessageDTO> messages = new ArrayList<>(state.messages());
+        LlmMessageDTO completion = LlmMessageDTO.assistantCompletion(summary);
+        messages.add(completion);
+        AgentVerificationResultModel verification = completionVerifier.verify(
+                state.goal(), messages, state.latestWorldState());
+
+        if (!verification.verified()) {
+            state.addMessage(LlmMessageDTO.userMessage("System Critique: Task is not complete. " + verification.reason()));
+            state.addStep(new AgentStepModel(stepNumber, summary, "Verification Failed", "",
+                    verification.reason(), provider, java.time.Instant.now()));
+            saveState(state);
+            return false;
+        }
+
+        state.addMessage(completion);
+        state.setStatus("COMPLETED");
+        state.setFinalAnswer(summary);
+        state.addStep(new AgentStepModel(stepNumber, "Task completion verified", "completion_verifier", "",
+                verification.reason(), provider, java.time.Instant.now()));
+        saveState(state);
+        return true;
+    }
+
     public TaskResponseDTO executeTask(String taskId, String goal) {
         log.info("event=task_started taskId={}", taskId);
         Timer.Sample sample = Timer.start(meterRegistry);
@@ -146,24 +233,7 @@ public class AgentOrchestratorService {
                 state.addStep(step);
             }
             if (res.success()) {
-                state.setStatus("COMPLETED");
-                state.setFinalAnswer(res.summary());
-                state.setPlan(java.util.List.of("1. Execute Tier-0 Ultra Instinct skill", "2. Verify DOM delivery"));
-                saveState(state);
-                log.info("=== [ORCHESTRATOR:L0_SUCCESS] taskId={} Instant completion without LLM overhead", taskId);
-                long duration = java.time.Duration.between(state.createdAt(), java.time.Instant.now()).toMillis();
-                trajectoryRecorderService.recordTrajectory(
-                        taskId,
-                        goal,
-                        null,
-                        state.steps().stream().map(dev.mark.agent.model.AgentStepModel::toolName).toList(),
-                        java.util.Map.of(),
-                        true,
-                        duration,
-                        0
-                );
-                sample.stop(meterRegistry.timer("agent.task.duration"));
-                return response(state);
+                return finishSkillExecution(state, res, sample);
             } else if (res.intervention() != null) {
                 dev.mark.tool.dto.HumanInterventionRequest intervention = res.intervention();
                 String displayTitle = "[" + intervention.type() + "] " + intervention.title();
@@ -194,27 +264,20 @@ public class AgentOrchestratorService {
                         for (dev.mark.agent.model.AgentStepModel step : retryResult.get().steps()) {
                             state.addStep(step);
                         }
-                        state.setStatus("COMPLETED");
-                        state.setFinalAnswer(retryResult.get().summary());
-                        saveState(state);
-                        long duration = java.time.Duration.between(state.createdAt(), java.time.Instant.now()).toMillis();
-                        trajectoryRecorderService.recordTrajectory(
-                                taskId,
-                                goal,
-                                null,
-                                state.steps().stream().map(dev.mark.agent.model.AgentStepModel::toolName).toList(),
-                                java.util.Map.of(),
-                                true,
-                                duration,
-                                0
-                        );
-                        sample.stop(meterRegistry.timer("agent.task.duration"));
-                        return response(state);
+                        return finishSkillExecution(state, retryResult.get(), sample);
+                    }
+                    if (retryResult.isPresent() && mayHavePerformedExternalAction(retryResult.get())) {
+                        for (dev.mark.agent.model.AgentStepModel step : retryResult.get().steps()) {
+                            state.addStep(step);
+                        }
+                        return finishUnverifiedSkillAction(state, retryResult.get(), sample);
                     }
                 } catch (Exception e) {
                     pendingReplies.remove(taskUuid);
                     log.error("=== [ORCHESTRATOR:L0_INTERVENTION_ERROR] taskId={}", taskId, e);
                 }
+            } else if (mayHavePerformedExternalAction(res)) {
+                return finishUnverifiedSkillAction(state, res, sample);
             }
         }
 
@@ -401,6 +464,8 @@ public class AgentOrchestratorService {
                 List<LlmToolObservationDTO> observations = new ArrayList<>();
                 boolean shouldAbortBatch = false;
                 boolean transitionDetected = false;
+                String completionCandidate = null;
+                String unverifiedSideEffect = null;
 
                 for (LlmToolCallDTO toolCall : response.toolCalls()) {
                     if (shouldAbortBatch) {
@@ -461,6 +526,11 @@ public class AgentOrchestratorService {
                     LlmToolObservationDTO observation = new LlmToolObservationDTO(toolCall.id(), toolCall.name(),
                             toolResult.successful(), details, toolResult.metadata());
                     observations.add(observation);
+                    String sideEffectWarning = unverifiedSideEffectWarning(observation);
+                    if (sideEffectWarning != null) {
+                        unverifiedSideEffect = sideEffectWarning;
+                        shouldAbortBatch = true;
+                    }
 
                     String argsJson = "{}";
                     try {
@@ -482,36 +552,18 @@ public class AgentOrchestratorService {
                                 || (state.currentPlanIndex() == state.plan().size() - 1
                                         && state.plan().get(state.currentPlanIndex()).toLowerCase().contains("complete"));
                         if (onlyCompletionRemains) {
-                            log.info("=== [ORCHESTRATOR:AUTO_COMPLETE_VERIFIED] taskId={} Tool '{}' verified goal. Auto-completing task.",
+                            log.info("=== [ORCHESTRATOR:AUTO_COMPLETE_CANDIDATE] taskId={} tool={} requires goal verification",
                                     state.taskId(), toolCall.name());
-                            state.setStatus("COMPLETED");
-                            String completionSummary = "Task successfully completed and verified: " + obsText;
-                            state.setFinalAnswer(completionSummary);
-                            for (LlmToolObservationDTO obs : observations) {
-                                state.addMessage(LlmMessageDTO.toolObservation(obs));
-                            }
-                            state.addStep(new AgentStepModel(stepNumber + 1, "Task Verified Complete", "task_complete", "{}",
-                                    completionSummary, response.provider(), java.time.Instant.now()));
-                            saveState(state);
-                            return;
+                            completionCandidate = "Action completed: " + obsText;
+                            shouldAbortBatch = true;
                         }
                     }
 
                     if ("task_complete".equals(toolCall.name()) && toolResult.successful()) {
-                        String summaryStr = toolCall.arguments().get("summary") instanceof String s ? s.trim().toLowerCase() : "";
-                        if (summaryStr.contains("no task completed") || summaryStr.contains("not completed yet") || summaryStr.contains("nothing completed")) {
-                            log.warn("=== [ORCHESTRATOR:REJECT_TASK_COMPLETE] taskId={} Rejected false completion: '{}'", state.taskId(), summaryStr);
-                            shouldAbortBatch = true;
-                        } else {
-                            log.info("=== [ORCHESTRATOR:TASK_COMPLETE] taskId={} marked complete via task_complete tool", state.taskId());
-                            state.setStatus("COMPLETED");
-                            state.setFinalAnswer(details);
-                            for (LlmToolObservationDTO obs : observations) {
-                                state.addMessage(LlmMessageDTO.toolObservation(obs));
-                            }
-                            saveState(state);
-                            return;
-                        }
+                        completionCandidate = toolCall.arguments().get("summary") instanceof String summary
+                                ? summary.trim() : details;
+                        log.info("=== [ORCHESTRATOR:TASK_COMPLETE_CANDIDATE] taskId={} requiring evidence gate", state.taskId());
+                        shouldAbortBatch = true;
                     }
 
                     if (toolResult.interventionRequest() != null || "ask_user".equals(toolCall.name())) {
@@ -590,6 +642,20 @@ public class AgentOrchestratorService {
 
                 for (LlmToolObservationDTO obs : observations) {
                     state.addMessage(LlmMessageDTO.toolObservation(obs));
+                }
+
+                if (unverifiedSideEffect != null) {
+                    state.setStatus("FAILED");
+                    state.setFinalAnswer(unverifiedSideEffect);
+                    state.addStep(new AgentStepModel(stepNumber, "External action may have occurred but was not verified",
+                            "completion_verifier", "", unverifiedSideEffect, response.provider(), java.time.Instant.now()));
+                    saveState(state);
+                    return;
+                }
+
+                if (completionCandidate != null) {
+                    verifyAndComplete(state, completionCandidate, response.provider(), stepNumber);
+                    return;
                 }
 
                 // Adaptive failure recovery: If a tool failed repeatedly, steer the model before the loop guardrail hits

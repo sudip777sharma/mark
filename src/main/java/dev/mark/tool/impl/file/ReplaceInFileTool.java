@@ -109,12 +109,14 @@ public class ReplaceInFileTool implements Tool {
             }
 
             if (content.equals(newContent)) {
-                return new ToolResultDTO(true, "No changes made. The target pattern was not found in the file.", Map.of("changed", false));
+                return new ToolResultDTO(true, "No changes made. The target pattern was not found in the file.",
+                        Map.of("path", pathStr, "changed", false, "verified", false));
             }
 
             Files.writeString(file, newContent, StandardCharsets.UTF_8);
-
-            return new ToolResultDTO(true, "Successfully replaced text in " + pathStr, Map.of("changed", true));
+            boolean verified = Files.readString(file, StandardCharsets.UTF_8).equals(newContent);
+            return new ToolResultDTO(true, "Successfully replaced text in " + pathStr,
+                    Map.of("path", pathStr, "changed", true, "verified", verified));
 
         } catch (IllegalArgumentException e) {
             return new ToolResultDTO(false, e.getMessage(), Map.of());

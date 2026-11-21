@@ -144,11 +144,11 @@ public class WhatsAppStatusSkill implements Skill {
             return SkillExecutionResult.requiresIntervention(result.interventionRequest(), result.observation(), steps);
         }
 
-        if (result.successful()) {
-            log.info("=== [L0_SKILL:WHATSAPP_STATUS_POSTED] taskId={} Status posted successfully!", taskId);
-            return SkillExecutionResult.completed("Status successfully posted to WhatsApp: " + result.observation(), steps);
+        if (result.successful() && Boolean.TRUE.equals(result.metadata().get("verified"))) {
+            log.info("=== [L0_SKILL:WHATSAPP_STATUS_VERIFIED] taskId={} Status postcondition verified", taskId);
+            return SkillExecutionResult.completed("Status successfully posted and verified on WhatsApp: " + result.observation(), steps, result.metadata());
         }
 
-        return SkillExecutionResult.failed("WhatsApp status execution failed: " + result.observation(), steps);
+        return SkillExecutionResult.failed("WhatsApp status was not verified: " + result.observation(), steps, result.metadata());
     }
 }

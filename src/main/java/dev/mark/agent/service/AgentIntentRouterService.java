@@ -48,6 +48,7 @@ public class AgentIntentRouterService {
 
         3. AUTONOMOUS_TASK:
            - Actionable goals, commands, or multi-step missions requiring tool execution, file creation/editing/reading, calculations, browser navigation, or desktop window automation.
+           - Requests for current or time-sensitive external information (latest news, weather, prices, schedules, or recent messages) that need a live source.
            - Examples: "calculate 15 * 8 and save to file.txt", "open Chrome and search for flights", "list files in my workspace", "organize downloads", "type this into Notepad", "inspect my screen".
            - Action: Set 'reply' to null and let the autonomous engine plan and execute it.
 

@@ -79,8 +79,9 @@ public class WriteFileTool implements Tool {
             }
             Files.writeString(resolved, content);
             long bytesWritten = content.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            boolean verified = Files.isRegularFile(resolved) && content.equals(Files.readString(resolved));
             return new ToolResultDTO(true, "Written " + bytesWritten + " bytes to " + pathStr,
-                    Map.of("path", pathStr, "bytesWritten", bytesWritten));
+                    Map.of("path", pathStr, "bytesWritten", bytesWritten, "verified", verified));
         } catch (IllegalArgumentException e) {
             return new ToolResultDTO(false, e.getMessage(), Map.of());
         } catch (IOException e) {

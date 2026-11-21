@@ -87,9 +87,38 @@ public class BrowserNavigateTool implements Tool {
                 }
             }
 
-            return new ToolResultDTO(true, "Navigated to " + url + ". Page title: " + title, Map.of("title", title));
+            String actualUrl = page.url();
+            boolean verified = sameDestination(url, actualUrl);
+            return new ToolResultDTO(true,
+                    "Navigated to " + actualUrl + ". Page title: " + title,
+                    Map.of("title", title, "requested_url", url, "actual_url", actualUrl, "verified", verified));
         } catch (Exception e) {
             return new ToolResultDTO(false, "Failed to navigate to " + url + ": " + e.getMessage(), Map.of());
         }
+    }
+
+    private boolean sameDestination(String requestedUrl, String actualUrl) {
+        try {
+            java.net.URI requested = java.net.URI.create(requestedUrl);
+            java.net.URI actual = java.net.URI.create(actualUrl);
+            String requestedHost = normalizeHost(requested.getHost());
+            String actualHost = normalizeHost(actual.getHost());
+            if (requestedHost.isBlank() || !requestedHost.equalsIgnoreCase(actualHost)) return false;
+            String requestedPath = normalizePath(requested.getPath());
+            String actualPath = normalizePath(actual.getPath());
+            return requestedPath.equals(actualPath);
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private String normalizeHost(String host) {
+        if (host == null) return "";
+        return host.toLowerCase(java.util.Locale.ROOT).replaceFirst("^www\\.", "");
+    }
+
+    private String normalizePath(String path) {
+        if (path == null || path.isBlank() || "/".equals(path)) return "/";
+        return path.replaceFirst("/+$", "");
     }
 }

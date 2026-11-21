@@ -87,7 +87,9 @@ public class DeleteFileTool implements Tool {
                 Files.delete(resolved);
             }
 
-            return new ToolResultDTO(true, "Successfully deleted " + pathStr, Map.of("path", pathStr));
+            boolean verified = !Files.exists(resolved);
+            return new ToolResultDTO(true, "Successfully deleted " + pathStr,
+                    Map.of("path", pathStr, "verified", verified));
         } catch (IllegalArgumentException e) {
             return new ToolResultDTO(false, e.getMessage(), Map.of());
         } catch (IOException e) {

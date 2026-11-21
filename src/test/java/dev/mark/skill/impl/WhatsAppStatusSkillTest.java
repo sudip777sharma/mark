@@ -64,7 +64,7 @@ class WhatsAppStatusSkillTest {
 
         assertTrue(result.success());
         assertNull(result.intervention());
-        assertTrue(result.summary().contains("Status successfully posted to WhatsApp"));
+        assertTrue(result.summary().contains("Status successfully posted and verified on WhatsApp"));
         assertEquals(1, result.steps().size());
         assertEquals("L0_DETERMINISTIC", result.steps().get(0).provider());
     }

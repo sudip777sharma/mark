@@ -144,9 +144,9 @@ public class WhatsAppSendSkill implements Skill {
 
         if (result.successful() && Boolean.TRUE.equals(result.metadata().get("verified"))) {
             log.info("=== [L0_SKILL:WHATSAPP_VERIFIED] taskId={} Verified in DOM!", taskId);
-            return SkillExecutionResult.completed("Message successfully sent and verified on WhatsApp: " + result.observation(), steps);
+            return SkillExecutionResult.completed("Message successfully sent and verified on WhatsApp: " + result.observation(), steps, result.metadata());
         }
 
-        return SkillExecutionResult.failed("Execution failed: " + result.observation(), steps);
+        return SkillExecutionResult.failed("Execution failed: " + result.observation(), steps, result.metadata());
     }
 }
