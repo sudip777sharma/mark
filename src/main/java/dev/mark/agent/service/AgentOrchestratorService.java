@@ -492,7 +492,7 @@ public class AgentOrchestratorService {
                 state.configId(),
                 systemPrompt,
                 userPrompt,
-                toolRegistryDefinitions(),
+                scopedToolDefinitions(state.goal(), activeStepText, currentWorldState),
                 "auto",
                 context);
 
@@ -744,6 +744,15 @@ public class AgentOrchestratorService {
                 // If model returned empty content with no tools while plan steps remain, re-prompt specifically for the active step
                 if ((response.content() == null || response.content().isBlank())
                         && state.plan() != null && activePlanStep <= state.plan().size()) {
+                    long consecutiveEmptyResponses = state.steps().stream()
+                            .filter(s -> "None".equals(s.toolName()) && s.outcome() != null && s.outcome().contains("Empty LLM response"))
+                            .count();
+                    if (consecutiveEmptyResponses >= 2) {
+                        log.warn("!!! [ORCHESTRATOR:EMPTY_LLM_ABORT] taskId={} LLM repeatedly returned empty responses. Aborting.", state.taskId());
+                        handleFailure(state, "Model repeatedly returned empty responses without invoking any tools. Please check your model configuration or select a more capable model.");
+                        return;
+                    }
+
                     log.warn("--- [ORCHESTRATOR:EMPTY_LLM_RESPONSE] taskId={} step={} LLM returned empty response while step {} ('{}') is pending. Prompting retry...",
                             state.taskId(), stepNumber, activePlanStep, activeStepText);
                     LlmMessageDTO promptRetry = LlmMessageDTO.userMessage(
@@ -809,6 +818,49 @@ public class AgentOrchestratorService {
                     e.getMessage(), e);
             handleFailure(state, "Step execution error: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName()));
         }
+    }
+
+    private List<LlmToolDefinitionDTO> scopedToolDefinitions(String goal, String activeStepText, AgentWorldStateModel worldState) {
+        String combined = ((goal != null ? goal : "") + " " + (activeStepText != null ? activeStepText : "")).toLowerCase();
+
+        boolean isWhatsAppRelevant = combined.contains("whatsapp")
+                || (worldState != null && worldState.activeWindow() != null && worldState.activeWindow().toLowerCase().contains("whatsapp"))
+                || (worldState != null && worldState.browserTitle() != null && worldState.browserTitle().toLowerCase().contains("whatsapp"));
+
+        boolean isBrowserRelevant = combined.contains("browser") || combined.contains("web") || combined.contains("http")
+                || combined.contains("www") || combined.contains(".com") || combined.contains(".in") || combined.contains(".org")
+                || combined.contains("irctc") || combined.contains("google") || combined.contains("search") || combined.contains("navigate")
+                || combined.contains("page") || combined.contains("url") || (worldState != null && worldState.browserUrl() != null && !worldState.browserUrl().isBlank());
+
+        boolean isFileRelevant = combined.contains("file") || combined.contains("folder") || combined.contains("directory")
+                || combined.contains(".txt") || combined.contains(".json") || combined.contains(".md") || combined.contains(".py")
+                || combined.contains(".java") || combined.contains(".csv") || combined.contains("write") || combined.contains("delete")
+                || combined.contains("save") || combined.contains("read");
+
+        return toolRegistry.availableTools().stream()
+                .filter(tool -> {
+                    String name = tool.name();
+                    // Always include core agent control tools
+                    if (name.equals("task_complete") || name.equals("ask_user") || name.equals("echo") || name.equals("calculator")) {
+                        return true;
+                    }
+                    // WhatsApp tools: ONLY if WhatsApp is explicitly relevant
+                    if (name.startsWith("whatsapp_") || name.equals("whatsapp_web")) {
+                        return isWhatsAppRelevant;
+                    }
+                    // Browser tools: if browser is relevant OR if not exclusively a pure desktop/file task
+                    if (name.startsWith("browser_")) {
+                        return isBrowserRelevant || !isWhatsAppRelevant;
+                    }
+                    // Filesystem tools
+                    if (name.endsWith("_file") || name.equals("list_directory") || name.equals("search_file_content")) {
+                        return isFileRelevant || (!isWhatsAppRelevant && !isBrowserRelevant);
+                    }
+                    // Desktop tools (execute_command, desktop_automation, inspect_ui, ocr, screen_recording)
+                    return true;
+                })
+                .map(tool -> new LlmToolDefinitionDTO(tool.name(), tool.description(), tool.parameterSchema()))
+                .collect(Collectors.toList());
     }
 
     private List<LlmToolDefinitionDTO> toolRegistryDefinitions() {
