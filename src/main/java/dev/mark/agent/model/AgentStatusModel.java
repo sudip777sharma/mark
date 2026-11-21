@@ -13,8 +13,8 @@ package dev.mark.agent.model;
  * orchestrators and schedulers to advance agents through their execution
  * phases.
  * - **Methods and variables:** Exposes constants (CREATED, PLANNING, EXECUTING,
- * VERIFYING, COMPLETED, FAILED, NEEDS_INPUT) alongside standard enum utilities
- * (values, valueOf) to track runtime checkpoints.
+ * VERIFYING, COMPLETED, FAILED, NEEDS_INPUT, INTERRUPTED, RECOVERING) alongside
+ * standard enum utilities (values, valueOf) to track runtime checkpoints.
  * - **Logic and architecture fit:** Drives the execution engine's control loop,
  * updates the persistence layer, and powers real-time frontend monitoring.
  */
@@ -28,5 +28,7 @@ public enum AgentStatusModel {
     FAILED,
     NEEDS_INPUT,
     COOLDOWN,
-    QUOTA_EXHAUSTED
+    QUOTA_EXHAUSTED,
+    INTERRUPTED,
+    RECOVERING
 }

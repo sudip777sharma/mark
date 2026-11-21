@@ -50,7 +50,10 @@ public class AgentCompletionVerifierService {
         }
 
         if (isMultiActionGoal(goal)) {
-            return failure(goal, "This goal contains multiple actions, but every requested postcondition is not yet independently verifiable.");
+            AgentVerificationResultModel multiResult = verifyMultiActionGoal(goal, messages, worldState, completion);
+            if (multiResult != null) {
+                return multiResult;
+            }
         }
 
         if (isBrowserNavigationGoal(goal)) {
@@ -99,6 +102,60 @@ public class AgentCompletionVerifierService {
         }
 
         return failure(goal, "Completion is not supported by available evidence. Non-consequential inspection tools alone do not verify task completion.");
+    }
+
+    private AgentVerificationResultModel verifyMultiActionGoal(
+            String goal,
+            List<LlmMessageDTO> messages,
+            AgentWorldStateModel worldState,
+            String completion) {
+
+        boolean hasRequiredComponents = false;
+
+        // 1. Check file mutation if mentioned
+        if (isFileMutationGoal(goal)) {
+            hasRequiredComponents = true;
+            if (!hasVerifiedFileMutation(goal, messages)) {
+                return failure(goal, "Multi-step goal requires file creation/modification, but verified file mutation evidence is missing.");
+            }
+        }
+
+        // 2. Check WhatsApp if mentioned
+        String whatsappAction = requiredWhatsAppAction(goal);
+        if (whatsappAction != null) {
+            hasRequiredComponents = true;
+            if (!hasVerifiedWhatsAppEvidence(goal, whatsappAction, messages)) {
+                return failure(goal, "Multi-step goal requires WhatsApp action '" + whatsappAction + "', but matching verified evidence is missing.");
+            }
+        }
+
+        // 3. Check Browser navigation if mentioned
+        if (Pattern.compile("(?i)\\b(open|navigate|visit|browse)\\b.*\\b(browser|web|url|http|www|website)\\b").matcher(goal).find()) {
+            hasRequiredComponents = true;
+            if (!hasVerifiedNavigation(goal, messages)) {
+                return failure(goal, "Multi-step goal requires browser navigation, but verified navigation evidence is missing.");
+            }
+        }
+
+        // 4. Check Application Launch if mentioned
+        if (Pattern.compile("(?i)\\b(open|launch|start)\\b.*\\b(app|application|notepad|calc|excel|word|code)\\b").matcher(goal).find()) {
+            hasRequiredComponents = true;
+            if (!isRequestedApplicationActive(goal, worldState)) {
+                return failure(goal, "Multi-step goal requires launching an application, but the requested application is not confirmed as active.");
+            }
+        }
+
+        // 5. Check if at least one consequential tool was executed and verified
+        boolean hasConsequentialToolVerified = messages.stream()
+                .filter(m -> "tool".equals(m.role()) && m.toolObservation() != null)
+                .map(LlmMessageDTO::toolObservation)
+                .anyMatch(obs -> obs.successful() && isVerified(obs.metadata()));
+
+        if (hasRequiredComponents || hasConsequentialToolVerified) {
+            return success(goal, "all verified sub-actions in multi-action goal successfully validated");
+        }
+
+        return null;
     }
 
     public AgentVerificationResultModel verifySkill(String goal, SkillExecutionResult result, AgentWorldStateModel worldState) {

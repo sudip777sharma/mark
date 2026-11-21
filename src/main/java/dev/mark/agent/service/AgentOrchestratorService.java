@@ -595,7 +595,7 @@ public class AgentOrchestratorService {
                     state.addStep(new AgentStepModel(stepNumber, response.content(), toolCall.name(), argsJson,
                             outcome + ": " + details, response.provider(), java.time.Instant.now()));
 
-                    if (toolResult.successful() && !"task_complete".equals(toolCall.name()) && !"ask_user".equals(toolCall.name())) {
+                    if (shouldAdvancePlan(toolCall.name(), toolResult, activeStepText)) {
                         state.advancePlanIndex();
                     }
 
@@ -719,11 +719,7 @@ public class AgentOrchestratorService {
                                 .filter(s -> obs.toolName().equals(s.toolName()) && s.outcome() != null && s.outcome().startsWith("Failed"))
                                 .count();
                         if (failureCount >= 2) {
-                            String guidance = "SYSTEM GUIDANCE: The tool '" + obs.toolName()
-                                    + "' has failed repeatedly. Do NOT call the exact same tool with identical arguments again. "
-                                    + "Either try an alternative strategy/tool, verify required preconditions, or call 'ask_user' to explain the blocker and request guidance.";
-                            log.info("--- [ORCHESTRATOR:GUIDANCE_INJECTED] taskId={} guidance='{}'", state.taskId(), guidance);
-                            state.addMessage(LlmMessageDTO.userMessage(guidance));
+                            replanRemainingSteps(state, obs.toolName(), obs.observation(), state.configId());
                             break;
                         }
                     }
@@ -835,6 +831,104 @@ public class AgentOrchestratorService {
                 new AgentStepModel(step, "Agent execution failed", "", "", reason, "system", java.time.Instant.now()));
         log.warn("event=task_failed taskId={} reason={}", state.taskId(), reason);
         return response(state);
+    }
+
+    private boolean shouldAdvancePlan(String toolName, ToolResultDTO result, String activeStepText) {
+        if (!result.successful()) return false;
+        if ("task_complete".equals(toolName) || "ask_user".equals(toolName)) return false;
+
+        boolean isConsequential = isConsequentialTool(toolName);
+        if (isConsequential) {
+            return true;
+        }
+
+        // For read-only/inspection tools, only advance if the current step is an observation/inspection step
+        if (activeStepText != null) {
+            String lower = activeStepText.toLowerCase();
+            return lower.contains("inspect") || lower.contains("read") || lower.contains("check")
+                    || lower.contains("find") || lower.contains("search") || lower.contains("list")
+                    || lower.contains("look") || lower.contains("observe") || lower.contains("verify");
+        }
+        return false;
+    }
+
+    private boolean isConsequentialTool(String toolName) {
+        return (toolName.endsWith("_file") && !toolName.startsWith("read_") && !toolName.startsWith("search_"))
+                || toolName.equals("replace_in_file")
+                || toolName.equals("execute_command")
+                || toolName.startsWith("desktop_automation")
+                || toolName.startsWith("browser_click")
+                || toolName.startsWith("browser_type")
+                || toolName.startsWith("browser_navigate")
+                || toolName.startsWith("whatsapp_");
+    }
+
+    private void replanRemainingSteps(AgentStateModel state, String failedTool, String failureDetails, Long configId) {
+        try {
+            log.warn(">>> [ORCHESTRATOR:REPLAN_START] taskId={} failedTool={} activeStepIndex={}",
+                    state.taskId(), failedTool, state.currentPlanIndex());
+            setAction(state, "Replanning dynamically after failure in " + failedTool + "...");
+
+            List<String> currentPlan = state.plan();
+            int currentIndex = state.currentPlanIndex();
+            List<String> completedSteps = (currentPlan != null && currentIndex > 0)
+                    ? currentPlan.subList(0, Math.min(currentIndex, currentPlan.size()))
+                    : List.of();
+
+            String activeStep = (currentPlan != null && currentIndex < currentPlan.size())
+                    ? currentPlan.get(currentIndex)
+                    : "Unknown step";
+
+            String replanPrompt = String.format(
+                    "Overall Goal: %s\n\nAlready Completed Steps (DO NOT REPEAT):\n%s\n\n"
+                    + "Active Step That Failed: %s\nFailure Reason: %s\nTool: %s\n\n"
+                    + "INSTRUCTION: Dynamic replanning is required. Formulate a new sequence of actionable steps to accomplish "
+                    + "the remaining part of the goal without repeating failed or already-completed steps.",
+                    state.goal(),
+                    completedSteps.isEmpty() ? "None" : String.join("\n", completedSteps),
+                    activeStep,
+                    failureDetails != null ? failureDetails : "Action failed",
+                    failedTool
+            );
+
+            LlmRequestDTO request = new LlmRequestDTO(
+                    state.taskId(),
+                    "Replanning",
+                    configId,
+                    promptBuilder.systemPromptForPlanning(),
+                    null,
+                    List.of(),
+                    null,
+                    List.of(LlmMessageDTO.userMessage(replanPrompt))
+            );
+
+            state.incrementLlmRequestCount();
+            PlanResponseDTO planResponse = llmRouter.planStream(request, chunk -> taskSseService.broadcastThoughtChunk(chunk));
+
+            if (planResponse != null && planResponse.steps() != null && !planResponse.steps().isEmpty()) {
+                List<String> newRemainingSteps = planResponse.steps();
+                List<String> updatedPlan = new ArrayList<>(completedSteps);
+                updatedPlan.addAll(newRemainingSteps);
+
+                state.setPlan(updatedPlan);
+                state.setCurrentPlanIndex(completedSteps.size());
+                saveState(state);
+
+                log.info("<<< [ORCHESTRATOR:REPLAN_READY] taskId={} updatedPlanCount={}", state.taskId(), updatedPlan.size());
+                state.addMessage(LlmMessageDTO.userMessage("SYSTEM GUIDANCE: Dynamic replanning completed. New remaining plan steps: " + newRemainingSteps));
+            } else {
+                String guidance = "SYSTEM GUIDANCE: The tool '" + failedTool
+                        + "' has failed repeatedly. Do NOT call the exact same tool with identical arguments again. "
+                        + "Try an alternative strategy or tool to accomplish the step.";
+                state.addMessage(LlmMessageDTO.userMessage(guidance));
+            }
+        } catch (Exception e) {
+            log.warn("!!! [ORCHESTRATOR:REPLAN_FAILED] taskId={} could not replan: {}", state.taskId(), e.getMessage());
+            String guidance = "SYSTEM GUIDANCE: The tool '" + failedTool
+                    + "' has failed repeatedly. Do NOT call the exact same tool with identical arguments again. "
+                    + "Try an alternative strategy or tool to accomplish the step.";
+            state.addMessage(LlmMessageDTO.userMessage(guidance));
+        }
     }
 
     private TaskResponseDTO response(AgentStateModel state) {

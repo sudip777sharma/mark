@@ -181,4 +181,31 @@ class AgentCompletionVerifierServiceTest {
         assertFalse(result.verified());
         assertTrue(result.reason().contains("Non-consequential inspection tools alone do not verify task completion"));
     }
+
+    @Test
+    void shouldAcceptMultiActionGoalWhenConstituentActionsAreVerified() {
+        LlmToolObservationDTO fileObs = new LlmToolObservationDTO(
+                "call-multi-1", "write_file", true,
+                "File created successfully: output.txt",
+                Map.of("path", "output.txt", "verified", true)
+        );
+        List<LlmMessageDTO> messages = List.of(
+                LlmMessageDTO.toolObservation(fileObs),
+                LlmMessageDTO.assistantCompletion("Created file output.txt and written data.")
+        );
+
+        AgentVerificationResultModel result = verifier.verify("Create a file named output.txt and write data to it", messages, defaultWorldState);
+        assertTrue(result.verified());
+    }
+
+    @Test
+    void shouldRejectMultiActionGoalWhenConstituentActionIsMissing() {
+        List<LlmMessageDTO> messages = List.of(
+                LlmMessageDTO.assistantCompletion("I finished creating the file output.txt and wrote data.")
+        );
+
+        AgentVerificationResultModel result = verifier.verify("Create a file named output.txt and write data to it", messages, defaultWorldState);
+        assertFalse(result.verified());
+        assertTrue(result.reason().contains("Multi-step goal requires file creation/modification"));
+    }
 }

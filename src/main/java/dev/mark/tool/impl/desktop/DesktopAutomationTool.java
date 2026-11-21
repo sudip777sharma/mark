@@ -1,5 +1,6 @@
 package dev.mark.tool.impl.desktop;
 
+import dev.mark.tool.contract.*;
 import dev.mark.tool.core.Tool;
 import dev.mark.tool.dto.ToolRequestDTO;
 import dev.mark.tool.dto.ToolResultDTO;
@@ -20,21 +21,16 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Desktop automation tool with focus-awareness.
- *
- * <p>Provides robust desktop automation capabilities by implementing {@link Tool}
- * and leveraging Java's {@link Robot} class alongside native Win32 API calls via PowerShell scripts.
- *
- * <p>Supports focus verification: when {@code target_window} is provided, verifies that
- * the window is in the foreground before executing state-changing input actions.
- * Also supports multi-key combinations (e.g. 'CTRL+F', 'CTRL+V') and clipboard-based instant paste.
+ * Desktop automation tool with focus-awareness and global mutex synchronization.
  */
 @Component
-public class DesktopAutomationTool implements Tool {
+public class DesktopAutomationTool implements ContractAwareTool {
 
     private static final Logger log = LoggerFactory.getLogger(DesktopAutomationTool.class);
+    private static final ReentrantLock DESKTOP_MUTEX = new ReentrantLock(true);
     private final Robot robot;
 
     public DesktopAutomationTool() {
@@ -81,11 +77,48 @@ public class DesktopAutomationTool implements Tool {
     }
 
     @Override
+    public ToolContract contract() {
+        return ToolContract.builder(name())
+                .description(description())
+                .category("DESKTOP")
+                .risk(ToolRiskClassification.SYSTEM_CONSEQUENTIAL)
+                .idempotency(IdempotencyPolicy.NON_IDEMPOTENT)
+                .timeoutMs(30_000L)
+                .parameter(ToolParameterSchema.requiredString("action", "Action: 'move', 'click', 'type', 'paste', 'press', 'delay', 'focus', or 'activate_and_click'"))
+                .parameter(ToolParameterSchema.optionalInt("x", "X coordinate", null))
+                .parameter(ToolParameterSchema.optionalInt("y", "Y coordinate", null))
+                .parameter(ToolParameterSchema.optionalString("button", "Mouse button: 'left', 'right', 'middle'", "left"))
+                .parameter(ToolParameterSchema.optionalString("text", "Text to type or paste", null))
+                .parameter(ToolParameterSchema.optionalString("key", "Key combination for press (e.g. ENTER, CTRL+V)", null))
+                .parameter(ToolParameterSchema.optionalInt("duration", "Delay milliseconds", 1000))
+                .parameter(ToolParameterSchema.optionalString("target_window", "Window title substring for focus verification", null))
+                .build();
+    }
+
+    @Override
     public ToolResultDTO execute(ToolRequestDTO request) {
         Map<String, Object> arguments = request.arguments();
         String action = (String) arguments.get("action");
         if (action == null) return new ToolResultDTO(false, "Action is required.", Map.of());
 
+        boolean locked = false;
+        try {
+            locked = DESKTOP_MUTEX.tryLock(30, TimeUnit.SECONDS);
+            if (!locked) {
+                return new ToolResultDTO(false, "Desktop interaction timed out waiting for desktop mutex lock.", Map.of());
+            }
+            return executeInternal(arguments, action);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return new ToolResultDTO(false, "Desktop automation interrupted while waiting for lock", Map.of());
+        } finally {
+            if (locked) {
+                DESKTOP_MUTEX.unlock();
+            }
+        }
+    }
+
+    private ToolResultDTO executeInternal(Map<String, Object> arguments, String action) {
         String targetWindow = (String) arguments.get("target_window");
 
         try {

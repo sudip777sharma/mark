@@ -1,37 +1,60 @@
 package dev.mark.tool.util;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * - What the class does: Provides shared filesystem utility operations, specifically secure path resolution.
- * - Why it is useful: Prevents path-traversal security vulnerabilities by ensuring untrusted inputs stay contained.
- * - How it fits in the flow of the application: Acts as a security gatekeeper whenever user or LLM-supplied paths need to be accessed on disk.
- * - Its methods and variables and how they are useful: Contains the private constructor to prevent instantiation and the resolveSandboxed method to safely validate paths.
- * - Its logic and how it gets fit into the overall application logic: Normalizes base and relative paths, resolves them together, and throws an exception if the result escapes the designated sandbox boundary.
- */
-
-/**
- * Shared utility for filesystem tools.
- *
- * <p>Resolves a user-supplied relative path against the sandbox base directory
- * and verifies the result stays within the sandbox.  This prevents path-traversal
- * attacks from untrusted LLM-generated input (e.g. {@code "../../etc/passwd"}).
+ * Shared utility for secure filesystem operations and sandbox enforcement.
+ * Prevents path traversal and symbolic link escape vulnerabilities.
  */
 public final class FileSystemUtils {
     private FileSystemUtils() { }
 
     /**
      * Resolve {@code relativePath} against {@code basePath} and ensure the
-     * result is still under {@code basePath}.
+     * result is strictly contained within {@code basePath}.
+     * Also checks real paths to prevent symlink traversal attacks.
      *
      * @throws IllegalArgumentException if the resolved path escapes the sandbox
      */
     public static Path resolveSandboxed(Path basePath, String relativePath) {
-        Path normalized = basePath.normalize();
-        Path resolved = normalized.resolve(relativePath).normalize();
-        if (!resolved.startsWith(normalized)) {
+        if (relativePath == null) {
+            throw new IllegalArgumentException("Path cannot be null");
+        }
+        Path normalizedBase = basePath.toAbsolutePath().normalize();
+        Path resolved = normalizedBase.resolve(relativePath).normalize();
+
+        if (!resolved.startsWith(normalizedBase)) {
             throw new IllegalArgumentException("Path escapes sandbox: " + relativePath);
         }
+
+        // Symlink protection: if the target or its parent exists, verify real path
+        if (Files.exists(resolved)) {
+            try {
+                Path realPath = resolved.toRealPath();
+                if (!realPath.startsWith(normalizedBase)) {
+                    throw new IllegalArgumentException("Symbolic link target escapes sandbox: " + relativePath);
+                }
+            } catch (IOException ignored) {
+                // If realPath cannot be resolved due to permissions, fall back to safe normalized check
+            }
+        } else {
+            // Check existing parent directory
+            Path parent = resolved.getParent();
+            while (parent != null && !Files.exists(parent)) {
+                parent = parent.getParent();
+            }
+            if (parent != null && Files.exists(parent)) {
+                try {
+                    Path realParent = parent.toRealPath();
+                    if (!realParent.startsWith(normalizedBase)) {
+                        throw new IllegalArgumentException("Parent symbolic link escapes sandbox: " + relativePath);
+                    }
+                } catch (IOException ignored) {}
+            }
+        }
+
         return resolved;
     }
 }

@@ -19,7 +19,6 @@ import java.util.UUID;
  * - Integrates into the application logic as the mutable data backbone that
  * transitions the agent from initialization to the final answer.
  */
-
 public final class AgentStateModel {
     private final UUID taskId;
     private final String goal;
@@ -29,10 +28,12 @@ public final class AgentStateModel {
     private final List<LlmMessageDTO> messages = new ArrayList<>();
     private AgentStatusModel status = AgentStatusModel.CREATED;
     private List<String> plan = new ArrayList<>();
+    private final List<PlanStepModel> structuredPlan = new ArrayList<>();
     private String finalAnswer;
     private String currentAction;
     private AgentWorldStateModel latestWorldState = AgentWorldStateModel.empty();
     private int llmRequestCount = 0;
+    private int currentPlanIndex = 0;
 
     public AgentStateModel(String taskId, String goal, Long configId) {
         this.taskId = UUID.fromString(taskId);
@@ -89,17 +90,44 @@ public final class AgentStateModel {
         return List.copyOf(plan);
     }
 
-    public void setPlan(List<String> plan) {
-        this.plan = new ArrayList<>(plan);
+    public List<PlanStepModel> structuredPlan() {
+        return List.copyOf(structuredPlan);
     }
 
-    private int currentPlanIndex = 0;
+    public void setPlan(List<String> plan) {
+        this.plan = new ArrayList<>(plan);
+        this.structuredPlan.clear();
+        if (plan != null) {
+            for (int i = 0; i < plan.size(); i++) {
+                this.structuredPlan.add(PlanStepModel.fromString(i, plan.get(i)));
+            }
+        }
+    }
+
+    public void setStructuredPlan(List<PlanStepModel> steps) {
+        this.structuredPlan.clear();
+        if (steps != null) {
+            this.structuredPlan.addAll(steps);
+            this.plan = new ArrayList<>(steps.stream().map(PlanStepModel::title).toList());
+        } else {
+            this.plan = new ArrayList<>();
+        }
+    }
+
+    public void markPlanStepStatus(int index, PlanStepModel.PlanStepStatus status) {
+        if (index >= 0 && index < structuredPlan.size()) {
+            structuredPlan.set(index, structuredPlan.get(index).withStatus(status));
+        }
+    }
 
     public int currentPlanIndex() {
         return currentPlanIndex;
     }
 
     public void advancePlanIndex() {
+        if (structuredPlan != null && currentPlanIndex < structuredPlan.size()) {
+            markPlanStepStatus(currentPlanIndex, PlanStepModel.PlanStepStatus.COMPLETED);
+        }
         if (plan != null && currentPlanIndex < plan.size()) {
             this.currentPlanIndex++;
         }
@@ -124,4 +152,3 @@ public final class AgentStateModel {
         return latestWorldState;
     }
 }
-

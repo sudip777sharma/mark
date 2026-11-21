@@ -1,47 +1,25 @@
 package dev.mark.tool.impl.file;
 
-
-import dev.mark.tool.util.FileSystemUtils;
 import dev.mark.tool.config.FileSystemPropertiesConfig;
-import dev.mark.tool.core.Tool;
+import dev.mark.tool.contract.*;
 import dev.mark.tool.dto.ToolRequestDTO;
 import dev.mark.tool.dto.ToolResultDTO;
+import dev.mark.tool.util.FileSystemUtils;
+import org.springframework.stereotype.Component;
+
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
-import org.springframework.stereotype.Component;
-
-/**
- * **1. What the class does:**
- * Deletes a specified file or directory recursively within a sandboxed workspace.
- *
- * **2. Why it is useful:**
- * It provides a secure, sandboxed file deletion mechanism that prevents directory traversal attacks, ensuring users or automated agents cannot delete files outside the designated workspace.
- *
- * **3. How it fits in the flow of the application:**
- * As a Spring-managed `@Component` implementing the `Tool` interface, it is registered in the tool registry and executed dynamically by the application's orchestrator when a file deletion action is requested.
- *
- * **4. Methods and variables utility:**
- * - `basePath` (variable): Stores the absolute path of the sandboxed workspace root.
- * - `name()`, `description()`, `parameterSchema()` (methods): Expose the tool's metadata and expected input schema to the calling framework.
- * - `execute(ToolRequestDTO)` (method): Validates the input, resolves the path safely, performs the deletion, and returns the execution status.
- *
- * **5. Logic and integration:**
- * - Resolves the target path against `basePath` using `FileSystemUtils.resolveSandboxed` to enforce security boundaries.
- * - If the path is a directory, it walks the file tree in reverse order to delete children before parents.
- * - If the path is a file, it deletes it directly.
- * - Returns a `ToolResultDTO` indicating success or failure, which the orchestrator uses to update the application state.
- */
 
 /**
  * Deletes a file or directory in the sandboxed workspace.
+ * Implements strict contract validation, root deletion prevention, and verified postconditions.
  */
 @Component
-public class DeleteFileTool implements Tool {
+public class DeleteFileTool implements ContractAwareTool {
     private final Path basePath;
 
     public DeleteFileTool(FileSystemPropertiesConfig properties) {
@@ -54,15 +32,45 @@ public class DeleteFileTool implements Tool {
         return "Delete a file or directory. Path is relative to the workspace root. If a directory is specified, it will be deleted recursively.";
     }
 
+    @Override
+    public ToolContract contract() {
+        return ToolContract.builder(name())
+                .description(description())
+                .category("FILESYSTEM")
+                .risk(ToolRiskClassification.HIGH_RISK_DESTRUCTIVE)
+                .idempotency(IdempotencyPolicy.NATURALLY_IDEMPOTENT)
+                .timeoutMs(15_000L)
+                .parameter(ToolParameterSchema.requiredString("path", "Relative path of the file or directory to delete"))
+                .precondition(req -> {
+                    String path = (String) req.arguments().get("path");
+                    if (path == null || path.isBlank()) return PreconditionCheck.PreconditionResult.fail("Path cannot be blank");
+                    String norm = path.trim().replace('\\', '/');
+                    if (norm.equals(".") || norm.equals("./") || norm.equals("/")) {
+                        return PreconditionCheck.PreconditionResult.fail("Deleting the workspace root directory is blocked by security policy.");
+                    }
+                    try {
+                        Path resolved = FileSystemUtils.resolveSandboxed(basePath, path);
+                        if (!Files.exists(resolved)) {
+                            return PreconditionCheck.PreconditionResult.fail("Path does not exist: " + path);
+                        }
+                        return PreconditionCheck.PreconditionResult.pass();
+                    } catch (Exception ex) {
+                        return PreconditionCheck.PreconditionResult.fail("Invalid path: " + ex.getMessage());
+                    }
+                })
+                .postcondition((req, res) -> {
+                    if (!res.successful()) return PostconditionCheck.PostconditionResult.fail("Deletion failed", Map.of());
+                    Boolean verified = (Boolean) res.metadata().get("verified");
+                    if (Boolean.TRUE.equals(verified)) {
+                        return PostconditionCheck.PostconditionResult.pass("Target absence verified on disk", res.metadata());
+                    }
+                    return PostconditionCheck.PostconditionResult.fail("Target still exists after delete attempt", res.metadata());
+                })
+                .build();
+    }
+
     @Override public Map<String, Object> parameterSchema() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "path", Map.of(
-                                "type", "string",
-                                "description", "Relative path of the file or directory to delete")
-                ),
-                "required", List.of("path"));
+        return contract().toJsonSchema();
     }
 
     @Override
@@ -71,6 +79,12 @@ public class DeleteFileTool implements Tool {
         if (!(rawPath instanceof String pathStr) || pathStr.isBlank()) {
             return new ToolResultDTO(false, "delete_file requires a non-blank string path argument", Map.of());
         }
+
+        String norm = pathStr.trim().replace('\\', '/');
+        if (norm.equals(".") || norm.equals("./") || norm.equals("/")) {
+            return new ToolResultDTO(false, "Deleting the workspace root directory is blocked by security policy.", Map.of());
+        }
+
         try {
             Path resolved = FileSystemUtils.resolveSandboxed(basePath, pathStr);
             if (!Files.exists(resolved)) {
@@ -88,7 +102,7 @@ public class DeleteFileTool implements Tool {
             }
 
             boolean verified = !Files.exists(resolved);
-            return new ToolResultDTO(true, "Successfully deleted " + pathStr,
+            return new ToolResultDTO(verified, verified ? "Successfully deleted " + pathStr : "Failed to verify deletion of " + pathStr,
                     Map.of("path", pathStr, "verified", verified));
         } catch (IllegalArgumentException e) {
             return new ToolResultDTO(false, e.getMessage(), Map.of());

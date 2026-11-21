@@ -1,46 +1,25 @@
 package dev.mark.tool.impl.file;
 
-
-import dev.mark.tool.util.FileSystemUtils;
 import dev.mark.tool.config.FileSystemPropertiesConfig;
-import dev.mark.tool.core.Tool;
+import dev.mark.tool.contract.*;
 import dev.mark.tool.dto.ToolRequestDTO;
 import dev.mark.tool.dto.ToolResultDTO;
+import dev.mark.tool.util.FileSystemUtils;
+import org.springframework.stereotype.Component;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Pattern;
-import org.springframework.stereotype.Component;
-
-/**
- * **1. What the class does:**
- * Replaces specific text or regular expression patterns inside a designated file.
- *
- * **2. Why it is useful:**
- * Enables safe, automated, and precise file modifications (literal or regex) within a restricted directory, avoiding the need to rewrite entire files.
- *
- * **3. Application Flow:**
- * Acts as a Spring-managed `Tool` component. It is dynamically discovered and executed by the application's orchestration layer (such as an LLM agent) to perform file-editing tasks.
- *
- * **4. Key Members & Utility:**
- * - `basePath` (Path): Restricts file operations to a secure, sandboxed directory.
- * - `name()`, `description()`, `parameterSchema()`: Provide metadata and input validation schemas for the tool execution framework.
- * - `execute(ToolRequestDTO)`: Validates arguments, performs the file read/write, and returns the execution outcome.
- *
- * **5. Logic & Integration:**
- * - Resolves the target file securely using `FileSystemUtils.resolveSandboxed` to prevent directory traversal.
- * - Reads file content and applies either `String.replace` (literal) or `String.replaceAll` (regex) based on the `isRegex` flag.
- * - Saves changes only if a modification occurred, returning a structured `ToolResultDTO` to inform the calling system of the success and change status.
- */
 
 /**
  * Replaces text or regex patterns in a specific file.
+ * Implements strict contract validation, precondition checking, and verified postconditions.
  */
 @Component
-public class ReplaceInFileTool implements Tool {
+public class ReplaceInFileTool implements ContractAwareTool {
     private final Path basePath;
 
     public ReplaceInFileTool(FileSystemPropertiesConfig properties) {
@@ -50,27 +29,46 @@ public class ReplaceInFileTool implements Tool {
     @Override public String name() { return "replace_in_file"; }
 
     @Override public String description() {
-        return "Find and replace text or regex patterns inside a specific file.";
+        return "Find and replace text or regex patterns inside a specific file within the workspace.";
+    }
+
+    @Override
+    public ToolContract contract() {
+        return ToolContract.builder(name())
+                .description(description())
+                .category("FILESYSTEM")
+                .risk(ToolRiskClassification.WORKSPACE_MUTATION)
+                .idempotency(IdempotencyPolicy.NON_IDEMPOTENT)
+                .timeoutMs(10_000L)
+                .parameter(ToolParameterSchema.requiredString("path", "Relative path of the file to edit."))
+                .parameter(ToolParameterSchema.requiredString("target", "The string or regex pattern to search for and replace."))
+                .parameter(ToolParameterSchema.requiredString("replacement", "The new string to replace the target with."))
+                .parameter(ToolParameterSchema.optionalBoolean("isRegex", "True if target is regex, false for literal string matching.", false))
+                .precondition(req -> {
+                    String path = (String) req.arguments().get("path");
+                    if (path == null || path.isBlank()) return PreconditionCheck.PreconditionResult.fail("Path cannot be blank");
+                    try {
+                        Path file = FileSystemUtils.resolveSandboxed(basePath, path);
+                        if (!Files.exists(file)) return PreconditionCheck.PreconditionResult.fail("Target file does not exist: " + path);
+                        if (!Files.isRegularFile(file)) return PreconditionCheck.PreconditionResult.fail("Target path is not a regular file: " + path);
+                        return PreconditionCheck.PreconditionResult.pass();
+                    } catch (Exception ex) {
+                        return PreconditionCheck.PreconditionResult.fail("Invalid path: " + ex.getMessage());
+                    }
+                })
+                .postcondition((req, res) -> {
+                    if (!res.successful()) return PostconditionCheck.PostconditionResult.fail("Execution failed", Map.of());
+                    Boolean verified = (Boolean) res.metadata().get("verified");
+                    if (Boolean.TRUE.equals(verified)) {
+                        return PostconditionCheck.PostconditionResult.pass("Replaced content strictly verified on disk", res.metadata());
+                    }
+                    return PostconditionCheck.PostconditionResult.fail("Post-replacement content verification failed on disk", res.metadata());
+                })
+                .build();
     }
 
     @Override public Map<String, Object> parameterSchema() {
-        return Map.of(
-                "type", "object",
-                "properties", Map.of(
-                        "path", Map.of(
-                                "type", "string",
-                                "description", "Relative path of the file to edit."),
-                        "target", Map.of(
-                                "type", "string",
-                                "description", "The string or regex pattern to search for and replace."),
-                        "replacement", Map.of(
-                                "type", "string",
-                                "description", "The new string to replace the target with."),
-                        "isRegex", Map.of(
-                                "type", "boolean",
-                                "description", "True if the target is a regular expression, false for literal string matching.")
-                ),
-                "required", List.of("path", "target", "replacement", "isRegex"));
+        return contract().toJsonSchema();
     }
 
     @Override
@@ -89,9 +87,7 @@ public class ReplaceInFileTool implements Tool {
         if (!(rawReplacement instanceof String replacementStr)) {
             return new ToolResultDTO(false, "replace_in_file requires a replacement argument", Map.of());
         }
-        if (!(rawIsRegex instanceof Boolean isRegex)) {
-            return new ToolResultDTO(false, "replace_in_file requires a boolean isRegex argument", Map.of());
-        }
+        boolean isRegex = Boolean.TRUE.equals(rawIsRegex);
 
         try {
             Path file = FileSystemUtils.resolveSandboxed(basePath, pathStr);
@@ -109,13 +105,13 @@ public class ReplaceInFileTool implements Tool {
             }
 
             if (content.equals(newContent)) {
-                return new ToolResultDTO(true, "No changes made. The target pattern was not found in the file.",
+                return new ToolResultDTO(false, "No changes made: the target pattern was not found in the file: " + pathStr,
                         Map.of("path", pathStr, "changed", false, "verified", false));
             }
 
             Files.writeString(file, newContent, StandardCharsets.UTF_8);
             boolean verified = Files.readString(file, StandardCharsets.UTF_8).equals(newContent);
-            return new ToolResultDTO(true, "Successfully replaced text in " + pathStr,
+            return new ToolResultDTO(verified, "Successfully replaced text in " + pathStr,
                     Map.of("path", pathStr, "changed", true, "verified", verified));
 
         } catch (IllegalArgumentException e) {
