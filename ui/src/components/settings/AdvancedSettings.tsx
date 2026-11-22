@@ -38,7 +38,11 @@ export const AdvancedSettings: React.FC = () => {
     { key: 'browser.headless', label: 'Browser Headless (true/false)', type: 'text', placeholder: 'false' },
     { key: 'browser.timeoutMs', label: 'Browser Timeout (ms)', type: 'number', placeholder: '10000' },
     { key: 'filesystem.basePath', label: 'File System Base Path', type: 'text', placeholder: './mark-workspace' },
-    { key: 'ui.maxDepth', label: 'UI Parse Max Depth', type: 'number', placeholder: '7' }
+    { key: 'ui.maxDepth', label: 'UI Parse Max Depth', type: 'number', placeholder: '7' },
+    { key: 'vision.primaryModel', label: 'Vision Tier-1 Edge Model', type: 'text', placeholder: 'mirage' },
+    { key: 'vision.mirageBaseUrl', label: 'Mirage Edge VLM Base URL', type: 'text', placeholder: 'http://localhost:8088/v1' },
+    { key: 'vision.secondaryModel', label: 'Vision Tier-2 Fallback Model', type: 'text', placeholder: 'qwen3-vl:2b' },
+    { key: 'vision.qwenBaseUrl', label: 'Qwen3-VL Base URL (Ollama)', type: 'text', placeholder: 'http://localhost:11434/v1' }
   ];
 
   return (

@@ -14,7 +14,7 @@ interface LlmProviderConfig {
   configured?: boolean;
 }
 
-const PROVIDER_TYPES = ['gemini', 'local', 'mirage', 'groq', 'openrouter', 'colab'];
+const PROVIDER_TYPES = ['gemini', 'local', 'groq', 'openrouter', 'colab'];
 
 export const SettingsView: React.FC = () => {
   const [configs, setConfigs] = useState<LlmProviderConfig[]>([]);
@@ -37,7 +37,8 @@ export const SettingsView: React.FC = () => {
     try {
       const res = await fetch('/api/config/llm/all');
       if (res.ok) {
-        const data: LlmProviderConfig[] = await res.json();
+        const raw: LlmProviderConfig[] = await res.json();
+        const data: LlmProviderConfig[] = raw.filter(c => c.providerType !== 'mirage' && !c.configName?.toLowerCase().includes('mirage'));
         setConfigs(data);
         
         const active = data.find(c => c.default);
@@ -417,7 +418,7 @@ export const SettingsView: React.FC = () => {
               value={editForm.activeModel || ''} 
               onChange={(e) => setEditForm({ ...editForm, activeModel: e.target.value })}
               list="model-suggestions"
-              placeholder={editForm.providerType === 'gemini' ? "e.g. gemini-3.6-flash" : editForm.providerType === 'mirage' ? "mirage" : "Select or type model identifier"}
+              placeholder={editForm.providerType === 'gemini' ? "e.g. gemini-3.6-flash" : "Select or type model identifier"}
               style={{
                 background: 'rgba(255, 255, 255, 0.05)',
                 border: '1px solid var(--border-subtle)',
@@ -432,11 +433,6 @@ export const SettingsView: React.FC = () => {
               }}
             />
             <datalist id="model-suggestions">
-              {editForm.providerType === 'mirage' && (
-                <>
-                  <option value="mirage" />
-                </>
-              )}
               {editForm.providerType === 'openrouter' && (
                 <>
                   <option value="google/gemma-4-31b-it:free" />

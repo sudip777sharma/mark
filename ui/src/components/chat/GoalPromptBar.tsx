@@ -26,13 +26,19 @@ export const GoalPromptBar: React.FC = () => {
 
   useEffect(() => {
     taskApi.getLlmConfig().then((cfg) => {
-      if (cfg?.activeProvider) {
+      if (cfg?.activeProvider && !cfg?.activeProvider.toLowerCase().includes('mirage')) {
         setActiveProvider(cfg.activeProvider, cfg.id || -1);
         setActiveModel(cfg.activeModel);
       }
     });
     fetch('/api/config/llm/all').then(res => res.json()).then(data => {
-       setConfigs(data);
+       const execConfigs = (data || []).filter((c: any) => c.providerType !== 'mirage' && !c.configName?.toLowerCase().includes('mirage'));
+       setConfigs(execConfigs);
+       if (execConfigs.length > 0 && (!activeProvider || activeProvider.toLowerCase().includes('mirage') || activeModel === 'mirage')) {
+         const def = execConfigs.find((c: any) => c.default) || execConfigs[0];
+         setActiveProvider(def.configName, def.id || -1);
+         setActiveModel(def.activeModel);
+       }
     }).catch(e => console.error(e));
   }, []);
 
@@ -41,7 +47,8 @@ export const GoalPromptBar: React.FC = () => {
     
     try {
       const res = await fetch('/api/config/llm/all');
-      const latestConfigs = await res.json();
+      const all = await res.json();
+      const latestConfigs = (all || []).filter((c: any) => c.providerType !== 'mirage' && !c.configName?.toLowerCase().includes('mirage'));
       setConfigs(latestConfigs);
 
       const currentIndex = latestConfigs.findIndex((c: any) => c.configName === activeProvider);
@@ -373,11 +380,6 @@ export const GoalPromptBar: React.FC = () => {
               <>
                 <option value="gemini-3.6-flash" style={{ background: 'var(--bg-card)' }}>gemini-3.6-flash</option>
                 <option value="gemini-3.1-pro" style={{ background: 'var(--bg-card)' }}>gemini-3.1-pro</option>
-              </>
-            )}
-            {configs.find(c => c.configName === activeProvider)?.providerType === 'mirage' && (
-              <>
-                <option value="mirage" style={{ background: 'var(--bg-card)' }}>mirage</option>
               </>
             )}
           </select>

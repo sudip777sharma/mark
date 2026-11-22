@@ -3,7 +3,7 @@ package dev.mark.agent.service;
 import dev.mark.agent.config.AgentPropertiesConfig;
 import dev.mark.agent.model.AgentStatusModel;
 import dev.mark.agent.observer.AgentEnvironmentObserver;
-import dev.mark.agent.service.visual.MirageVisualAgentRunner;
+import dev.mark.llm.dto.PlanResponseDTO;
 import dev.mark.llm.entity.ApiKeyEntry;
 import dev.mark.llm.entity.LlmProviderConfig;
 import dev.mark.llm.service.LlmRouterService;
@@ -47,7 +47,6 @@ class AgentOrchestratorServiceTest {
     private LlmSettingsService llmSettingsService;
     private L0SkillEngine l0SkillEngine;
     private TrajectoryRecorderService trajectoryRecorderService;
-    private MirageVisualAgentRunner mirageVisualAgentRunner;
 
     private AgentOrchestratorService orchestrator;
 
@@ -68,7 +67,6 @@ class AgentOrchestratorServiceTest {
         llmSettingsService = mock(LlmSettingsService.class);
         l0SkillEngine = mock(L0SkillEngine.class);
         trajectoryRecorderService = mock(TrajectoryRecorderService.class);
-        mirageVisualAgentRunner = mock(MirageVisualAgentRunner.class);
 
         orchestrator = new AgentOrchestratorService(
                 userPreferenceService,
@@ -85,81 +83,47 @@ class AgentOrchestratorServiceTest {
                 meterRegistry,
                 llmSettingsService,
                 l0SkillEngine,
-                trajectoryRecorderService,
-                mirageVisualAgentRunner
+                trajectoryRecorderService
         );
     }
 
     @Test
-    void testExecuteTaskWithMirageConfigDelegatesDirectlyToMirageVisualRunner() {
+    void testExecuteTaskUsesLlmRouterForPlanning() {
         UUID taskId = UUID.randomUUID();
         String goal = "Search trains from Delhi to Mumbai on IRCTC";
-        Long configId = 99L;
+        Long configId = 35L;
 
         TaskEntity entity = new TaskEntity(taskId, goal, AgentStatusModel.PLANNING, null, Instant.now());
         entity.setConfigId(configId);
         when(taskRepository.findById(taskId)).thenReturn(Optional.of(entity));
 
-        LlmProviderConfig mirageConfig = new LlmProviderConfig(
-                "Mirage VLM (Local Edge Vision)",
-                "mirage",
-                "mirage",
-                "http://localhost:8088/v1",
-                false,
-                List.of(new ApiKeyEntry("local", "mirage", true))
-        );
-        when(llmSettingsService.getConfig(configId)).thenReturn(Optional.of(mirageConfig));
-
-        TaskResponseDTO mirageResponse = new TaskResponseDTO(
-                taskId, goal, AgentStatusModel.COMPLETED,
-                "Task successfully completed using pure Mirage VLM (22 MB) local execution.",
-                "Completed", List.of(), 0, List.of()
-        );
-        when(mirageVisualAgentRunner.execute(any(), any())).thenReturn(mirageResponse);
-
-        TaskResponseDTO response = orchestrator.executeTask(taskId.toString(), goal);
-
-        assertNotNull(response);
-        assertEquals(AgentStatusModel.COMPLETED, response.status());
-        assertTrue(response.finalAnswer().contains("Mirage VLM"));
-
-        // Verify delegation directly to Mirage runner
-        verify(mirageVisualAgentRunner).execute(any(), any());
-
-        // Verify neither LLM router nor L0 skills were called
-        verify(llmRouter, never()).plan(any());
-        verify(l0SkillEngine, never()).tryExecute(any(), any());
-    }
-
-    @Test
-    void testExecuteTaskWithDefaultMirageConfigDelegatesToMirageVisualRunner() {
-        UUID taskId = UUID.randomUUID();
-        String goal = "Interact with desktop";
-
-        TaskEntity entity = new TaskEntity(taskId, goal, AgentStatusModel.PLANNING, null, Instant.now());
-        entity.setConfigId(null); // No explicit configId, relies on default
-        when(taskRepository.findById(taskId)).thenReturn(Optional.of(entity));
-
-        LlmProviderConfig defaultMirage = new LlmProviderConfig(
-                "Mirage VLM",
-                "mirage",
-                "mirage",
-                "http://localhost:8088/v1",
+        LlmProviderConfig groqConfig = new LlmProviderConfig(
+                "GROQ config",
+                "groq",
+                "llama-3.1-70b-versatile",
+                "https://api.groq.com/openai/v1",
                 true,
-                List.of(new ApiKeyEntry("local", "mirage", true))
+                List.of(new ApiKeyEntry("groq", "gsk_test", true))
         );
-        when(llmSettingsService.getDefaultConfig()).thenReturn(Optional.of(defaultMirage));
+        when(llmSettingsService.getConfig(configId)).thenReturn(Optional.of(groqConfig));
+        when(llmSettingsService.getApiKeysCount(configId)).thenReturn(1);
 
-        TaskResponseDTO mirageResponse = new TaskResponseDTO(
-                taskId, goal, AgentStatusModel.COMPLETED, "Done via Mirage", "Completed", List.of(), 0, List.of()
+        PlanResponseDTO planResponse = new PlanResponseDTO(List.of(
+                "Open browser and navigate to IRCTC",
+                "Use perceive_screen to find train search inputs"
+        ));
+        when(llmRouter.planStream(any(), any())).thenReturn(planResponse);
+
+        // Cancel task so loop stops after planning
+        when(taskRepository.findById(taskId)).thenReturn(
+                Optional.of(entity),
+                Optional.of(new TaskEntity(taskId, goal, AgentStatusModel.FAILED, "stopped", Instant.now()))
         );
-        when(mirageVisualAgentRunner.execute(any(), any())).thenReturn(mirageResponse);
 
         TaskResponseDTO response = orchestrator.executeTask(taskId.toString(), goal);
 
         assertNotNull(response);
-        assertEquals(AgentStatusModel.COMPLETED, response.status());
-        verify(mirageVisualAgentRunner).execute(any(), any());
-        verify(llmRouter, never()).plan(any());
+        // Verify LLM router was called for streaming plan
+        verify(llmRouter).planStream(any(), any());
     }
 }

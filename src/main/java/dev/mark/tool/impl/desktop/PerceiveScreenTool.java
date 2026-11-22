@@ -37,12 +37,18 @@ public class PerceiveScreenTool implements ContractAwareTool {
     private final VisionEngineService visionEngine;
     private final ScreenshotTool screenshotTool;
     private final ScreenshotCacheService screenshotCache;
+    private final DesktopAutomationTool desktopTool;
+
+    public PerceiveScreenTool(VisionEngineService visionEngine, ScreenshotTool screenshotTool, ScreenshotCacheService screenshotCache) {
+        this(visionEngine, screenshotTool, screenshotCache, null);
+    }
 
     @Autowired
-    public PerceiveScreenTool(VisionEngineService visionEngine, ScreenshotTool screenshotTool, ScreenshotCacheService screenshotCache) {
+    public PerceiveScreenTool(VisionEngineService visionEngine, ScreenshotTool screenshotTool, ScreenshotCacheService screenshotCache, DesktopAutomationTool desktopTool) {
         this.visionEngine = visionEngine;
         this.screenshotTool = screenshotTool;
         this.screenshotCache = screenshotCache;
+        this.desktopTool = desktopTool;
     }
 
     @Override
@@ -62,6 +68,7 @@ public class PerceiveScreenTool implements ContractAwareTool {
                 "type", "object",
                 "properties", Map.of(
                         "target", Map.of("type", "string", "description", "Optional description of the target UI element to find (e.g. 'Search bar', 'Submit button', 'Settings icon')"),
+                        "target_app", Map.of("type", "string", "description", "Optional window title or application name to activate/bring to foreground before capture (e.g. 'Chrome', 'Notepad', 'IRCTC')"),
                         "image_path", Map.of("type", "string", "description", "Optional path to existing screenshot. If omitted, captures a fresh screen image.")
                 )
         );
@@ -76,6 +83,7 @@ public class PerceiveScreenTool implements ContractAwareTool {
                 .idempotency(IdempotencyPolicy.NATURALLY_IDEMPOTENT)
                 .timeoutMs(40_000L)
                 .parameter(ToolParameterSchema.optionalString("target", "Target element description", null))
+                .parameter(ToolParameterSchema.optionalString("target_app", "Window title or application to activate before capture", null))
                 .parameter(ToolParameterSchema.optionalString("image_path", "Path to screenshot image", null))
                 .build();
     }
@@ -84,7 +92,18 @@ public class PerceiveScreenTool implements ContractAwareTool {
     public ToolResultDTO execute(ToolRequestDTO request) {
         Map<String, Object> args = request.arguments();
         String target = args.get("target") != null ? args.get("target").toString().trim() : null;
+        String targetApp = args.get("target_app") != null ? args.get("target_app").toString().trim() : null;
         String imagePath = args.get("image_path") != null ? args.get("image_path").toString().trim() : null;
+
+        if (targetApp != null && !targetApp.isBlank() && desktopTool != null) {
+            log.info("perceive_screen bringing '{}' to foreground before capture", targetApp);
+            desktopTool.bringToForeground(targetApp);
+            try {
+                Thread.sleep(400);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
 
         BufferedImage image = null;
         ScreenDimension screen = null;
