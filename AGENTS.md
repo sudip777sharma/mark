@@ -1,13 +1,49 @@
-# MARK agent notes
+# MARK engineering rules
 
-MARK is a local-first autonomous-agent prototype. It uses Java 21, Spring Boot 3.5, Maven Wrapper, JUnit, Playwright, and an H2 development database. It has an LLM-driven task loop plus file, browser, desktop, and system tools; treat these tools as potentially consequential.
+## Product direction
 
-Build with `./mvnw clean verify`; run tests with `./mvnw test`; start with `./mvnw spring-boot:run`.
+MARK has a cloud-hosted modular Spring Boot backend and a separate local Windows Device Runtime. The runtime initiates an authenticated outbound connection to the cloud and executes only explicitly allowed device commands.
 
-Keep the codebase small. Prefer deterministic tools and structured interfaces. Preserve the narrow tool and LLM-provider abstractions so providers and tools can be added without changing orchestration. Important actions must retain explicit observation and verification paths. Do not add a major framework or capability without a separately agreed milestone.
+## Keep the code small
 
-## Agent Interaction Rules
-For any issue or concern raised by the user, the agent MUST follow these three steps BEFORE making any changes:
-1. **Confirm the concern**: Acknowledge and restate the user's concern to ensure it is fully understood.
-2. **Discuss the root cause**: Analyze and explain what is causing the issue.
-3. **Discuss the resolution**: Present the research and analysis for how the concern will be resolved, and ask for confirmation before proceeding with any code edits.
+- Prefer direct, readable code over speculative frameworks and abstraction layers.
+- Do not create microservices for backend modules.
+- Do not add a dependency unless it solves a current requirement.
+- Do not add an interface with only one implementation unless it creates a real boundary (for example, an external provider or device transport).
+- Do not create generic engines, ASTs, transition analyzers, or plugin systems without a demonstrated use case.
+- Keep methods focused and data contracts explicit.
+- Delete dead code instead of preserving speculative compatibility.
+
+## Architecture boundaries
+
+- User owns profile and user-configurable preferences.
+- Task owns task records, lifecycle status, activity events, and final results.
+- Agent owns planning, orchestration, tool selection/execution coordination, verification, and recovery.
+- Model owns model/provider metadata, routing, and inference adapters.
+- Cloud Device module owns pairing, device registry, connection state, and command dispatch.
+- Device Runtime owns local Windows execution and local permissions.
+- Memory is deferred until a concrete use case and data lifecycle are designed.
+
+## UI rules
+
+- Three columns: task list, main activity stream, collapsible context panel.
+- One chronological activity stream; no separate planning, thoughts, or trace pages.
+- Show concise user-facing status and outcomes, not private chain-of-thought.
+- Long tool output may be expanded on demand.
+- Keep the prompt composer compact.
+
+## Safety and reliability
+
+- Never expose a Windows device port directly to the public internet.
+- Device Runtime connects outward using authenticated WSS.
+- Validate every command locally before execution.
+- Do not execute arbitrary shell strings supplied by an LLM.
+- Require explicit approval for consequential actions.
+- Use command IDs, expiry, and duplicate protection for side-effecting commands.
+- Never claim a task succeeded without evidence.
+
+## Changes
+
+- Add tests for meaningful behavior.
+- Explain the files changed, runtime flow, and how to test each milestone.
+- Do not silently make broad architectural changes.

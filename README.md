@@ -1,30 +1,53 @@
 # MARK
 
-MARK (codename MARK-45) is a local-first autonomous-agent prototype. It combines an LLM-driven orchestration loop with bounded tool execution for filesystem, browser, desktop, and system tasks.
-
-## Run
-
-Requires Java 21 and Maven Wrapper.
-
-```powershell
-.\mvnw.cmd clean verify
-.\mvnw.cmd spring-boot:run -Dspring-boot.run.arguments="--server.port=8081"
-```
-
-Run llama.cpp on `127.0.0.1:8080`, then start MARK on `8081` and create a task:
-
-```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8081/api/tasks -ContentType application/json -Body '{"goal":"Summarize the project status"}'
-```
-
-MARK sends the goal, bounded history, current environment state, and available tool schemas to the configured provider. Tool results are persisted to the local H2 development database and become observations for later iterations.
-
-## Multi-step agent loop
-
-`AgentOrchestratorService` retains typed conversation history: prior tool calls, structured tool observations, and assistant completion content. It repeats model selection and tool execution for up to `mark.agent.max-steps` (default `30`). An explicit model completion must pass `AgentCompletionVerifierService`; tool errors and unknown tool names become observations so the model can re-plan on the next iteration.
+MARK is a local-first computer-use agent with a cloud-hosted brain and a local Windows execution runtime.
 
 ## Architecture
 
-`TaskController` delegates to `AgentOrchestratorService`. The orchestrator owns task-state transitions and calls tools through `ToolRegistry`. `LlmRouterService` routes prompts to the configured provider. Tool results carry the observation used by verification.
+- **Cloud backend:** one Spring Boot modular monolith.
+- **Windows device runtime:** a separate, lightweight Java process that connects outward to the cloud over authenticated WebSocket.
+- **Desktop UI:** React + TypeScript + Vite + Tailwind CSS; Tauri will package the UI and local runtime later.
 
-The next architecture milestone is structured UI observation: stable UI-element identity, scoped snapshots, and transition-aware action validation. Do not treat the currently available filesystem, command, browser, or desktop tools as unrestricted automation; consequential operations require explicit user approval.
+The backend is not split into microservices. User, Task, Agent, Model, and Device are modules with explicit boundaries inside one application. Memory is intentionally deferred.
+
+## Repository layout
+
+```text
+backend/          Cloud Spring Boot application
+device-runtime/   Local Windows execution client
+frontend/         React desktop UI
+desktop/          Tauri packaging (later milestone)
+docs/             Architecture and decisions
+```
+
+## Prerequisites
+
+- Java 21
+- Maven 3.9+
+- Node.js 22.12+
+- npm
+
+## Run the backend
+
+```powershell
+cd backend
+mvn spring-boot:run
+```
+
+Health check: `http://localhost:8080/api/v1/health`
+
+## Run the frontend
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Open the Vite URL shown in the terminal (normally `http://localhost:5173`).
+
+The first frontend milestone uses clearly identified preview data. Task submission, authentication, device pairing, and cloud connectivity are not implemented yet.
+
+## Engineering rule
+
+Prefer the smallest implementation that satisfies a tested requirement. Do not add frameworks, abstractions, services, background workers, or configuration layers without a concrete need and an agreed milestone.
