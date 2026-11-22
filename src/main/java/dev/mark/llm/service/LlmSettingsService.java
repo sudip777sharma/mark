@@ -41,6 +41,34 @@ public class LlmSettingsService {
                 repository.save(localConfig);
                 log.info("Initialized default Local Ollama provider: http://localhost:11434/v1 (model: qwen2.5:latest)");
             }
+
+            if (repository.findByConfigName("Ollama Qwen3-VL (Local Vision)").isEmpty()) {
+                LlmProviderConfig qwenVlConfig = new LlmProviderConfig(
+                        "Ollama Qwen3-VL (Local Vision)",
+                        "local",
+                        "qwen3-vl:2b",
+                        "http://localhost:11434/v1",
+                        false,
+                        List.of(new ApiKeyEntry("local", "ollama", true))
+                );
+                qwenVlConfig.setConfigured(true);
+                repository.save(qwenVlConfig);
+                log.info("Initialized default Local Qwen3-VL Vision provider: http://localhost:11434/v1 (model: qwen3-vl:2b)");
+            }
+
+            if (repository.findByConfigName("Mirage VLM (Local Edge Vision)").isEmpty()) {
+                LlmProviderConfig mirageConfig = new LlmProviderConfig(
+                        "Mirage VLM (Local Edge Vision)",
+                        "mirage",
+                        "mirage-22mb",
+                        "http://localhost:8088/v1",
+                        false,
+                        List.of(new ApiKeyEntry("local", "mirage", true))
+                );
+                mirageConfig.setConfigured(true);
+                repository.save(mirageConfig);
+                log.info("Initialized default Local Mirage VLM provider: http://localhost:8088/v1 (model: mirage-22mb)");
+            }
         } catch (Exception e) {
             log.warn("Notice during Ollama default config initialization: {}", e.getMessage());
         }

@@ -22,6 +22,17 @@ mark:
     timeout-ms: 10000
   filesystem:
     base-path: ./mark-workspace
+  vision:
+    primary-model: mirage
+    secondary-model: qwen3-vl
+    mirage:
+      base-url: "http://localhost:8088/v1"
+      model: "mirage-22mb"
+      timeout-ms: 3000
+    qwen:
+      base-url: "http://localhost:11434/v1"
+      model: "qwen3-vl:2b"
+      timeout-ms: 35000
 management:
   endpoints:
     web:
