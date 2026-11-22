@@ -4,17 +4,14 @@
     "src/main/java",
     "src/main/resources"
   ],
-  "ext": "java,yml,yaml,properties,html,css,js",
+  "ext": "java,yml,yaml,properties",
   "ignore": [
     "src/test/**",
     "target/**",
-    "node_modules/**",
     "ui/**",
     "mark-internal/**",
-    "mark-workspace/**",
-    ".git/**",
-    ".vscode/**"
+    "mark-workspace/**"
   ],
   "delay": 1500,
-  "exec": "powershell -ExecutionPolicy Bypass -File .\\dev.ps1"
+  "exec": ".\\mvnw.cmd spring-boot:run"
 }
