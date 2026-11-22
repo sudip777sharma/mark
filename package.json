@@ -1,0 +1,13 @@
+{
+  "name": "mark-app",
+  "version": "0.0.1",
+  "description": "MARK — Autonomous Digital Agent",
+  "scripts": {
+    "dev": "nodemon",
+    "start": "nodemon",
+    "kill:port": "powershell -ExecutionPolicy Bypass -File .\\kill-port.ps1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

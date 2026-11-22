@@ -20,6 +20,7 @@ mark-workspace/*
 !mark-workspace/.gitkeep
 
 # Frontend dependencies and generated build output
+node_modules/
 ui/node_modules/
 ui/dist/
 
