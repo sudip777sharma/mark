@@ -83,6 +83,7 @@ public class AgentOrchestratorService {
     private final dev.mark.llm.service.LlmSettingsService llmSettingsService;
     private final dev.mark.skill.service.L0SkillEngine l0SkillEngine;
     private final dev.mark.trajectory.service.TrajectoryRecorderService trajectoryRecorderService;
+    private final dev.mark.agent.service.visual.MirageVisualAgentRunner mirageVisualAgentRunner;
 
     public AgentOrchestratorService(dev.mark.preference.UserPreferenceService userPreferenceService,
             LlmRouterService llmRouter,
@@ -96,7 +97,8 @@ public class AgentOrchestratorService {
             ToolRegistry toolRegistry, MeterRegistry meterRegistry,
             dev.mark.llm.service.LlmSettingsService llmSettingsService,
             dev.mark.skill.service.L0SkillEngine l0SkillEngine,
-            dev.mark.trajectory.service.TrajectoryRecorderService trajectoryRecorderService) {
+            dev.mark.trajectory.service.TrajectoryRecorderService trajectoryRecorderService,
+            dev.mark.agent.service.visual.MirageVisualAgentRunner mirageVisualAgentRunner) {
         this.userPreferenceService = userPreferenceService;
         this.llmRouter = llmRouter;
         this.taskRepository = taskRepository;
@@ -112,6 +114,7 @@ public class AgentOrchestratorService {
         this.meterRegistry = meterRegistry;
         this.l0SkillEngine = l0SkillEngine;
         this.trajectoryRecorderService = trajectoryRecorderService;
+        this.mirageVisualAgentRunner = mirageVisualAgentRunner;
     }
 
     public Map<UUID, CompletableFuture<String>> getPendingReplies() {
@@ -260,6 +263,13 @@ public class AgentOrchestratorService {
                 .orElse(null);
 
         AgentStateModel state = new AgentStateModel(taskId, goal, configId);
+
+        // Check if Mirage model is selected: Pure visual execution runner
+        if (isMirageSelected(configId)) {
+            log.info(">>> [ORCHESTRATOR:MIRAGE_EXECUTION] taskId={} configId={} goal='{}' - Delegating directly to MirageVisualAgentRunner", taskId, configId, goal);
+            return mirageVisualAgentRunner.execute(state, sample);
+        }
+
         state.setStatus("EXECUTING");
         setAction(state, "Executing Ultra Instinct Tier-0 Skill: " + goal);
 
@@ -1013,5 +1023,27 @@ public class AgentOrchestratorService {
 
     private String failureMessage(Throwable exception) {
         return exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
+    }
+
+    private boolean isMirageSelected(Long configId) {
+        if (configId != null) {
+            return llmSettingsService.getConfig(configId)
+                    .map(this::isMirageConfig)
+                    .orElse(false);
+        } else {
+            return llmSettingsService.getDefaultConfig()
+                    .map(this::isMirageConfig)
+                    .orElse(false);
+        }
+    }
+
+    private boolean isMirageConfig(dev.mark.llm.entity.LlmProviderConfig cfg) {
+        if (cfg == null) return false;
+        String type = cfg.getProviderType() != null ? cfg.getProviderType().toLowerCase() : "";
+        String model = cfg.getActiveModel() != null ? cfg.getActiveModel().toLowerCase() : "";
+        String name = cfg.getConfigName() != null ? cfg.getConfigName().toLowerCase() : "";
+        return "mirage".equals(type)
+                || model.contains("mirage")
+                || name.contains("mirage");
     }
 }

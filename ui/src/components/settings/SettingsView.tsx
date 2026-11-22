@@ -14,7 +14,7 @@ interface LlmProviderConfig {
   configured?: boolean;
 }
 
-const PROVIDER_TYPES = ['gemini', 'local', 'groq', 'openrouter', 'colab'];
+const PROVIDER_TYPES = ['gemini', 'local', 'mirage', 'groq', 'openrouter', 'colab'];
 
 export const SettingsView: React.FC = () => {
   const [configs, setConfigs] = useState<LlmProviderConfig[]>([]);
@@ -417,7 +417,7 @@ export const SettingsView: React.FC = () => {
               value={editForm.activeModel || ''} 
               onChange={(e) => setEditForm({ ...editForm, activeModel: e.target.value })}
               list="model-suggestions"
-              placeholder={editForm.providerType === 'gemini' ? "e.g. gemini-3.6-flash" : "Select or type model identifier"}
+              placeholder={editForm.providerType === 'gemini' ? "e.g. gemini-3.6-flash" : editForm.providerType === 'mirage' ? "mirage" : "Select or type model identifier"}
               style={{
                 background: 'rgba(255, 255, 255, 0.05)',
                 border: '1px solid var(--border-subtle)',
@@ -432,6 +432,11 @@ export const SettingsView: React.FC = () => {
               }}
             />
             <datalist id="model-suggestions">
+              {editForm.providerType === 'mirage' && (
+                <>
+                  <option value="mirage" />
+                </>
+              )}
               {editForm.providerType === 'openrouter' && (
                 <>
                   <option value="google/gemma-4-31b-it:free" />
@@ -475,6 +480,7 @@ export const SettingsView: React.FC = () => {
               list="baseurl-suggestions"
               placeholder={
                 editForm.providerType === 'local' ? "e.g. http://localhost:11434/v1" :
+                editForm.providerType === 'mirage' ? "e.g. http://127.0.0.1:8088/v1" :
                 editForm.providerType === 'openrouter' ? "e.g. https://openrouter.ai/api/v1" :
                 editForm.providerType === 'groq' ? "e.g. https://api.groq.com/openai/v1" :
                 editForm.providerType === 'colab' ? "e.g. https://your-trycloudflare.com/v1" :
@@ -493,6 +499,7 @@ export const SettingsView: React.FC = () => {
               }}
             />
             <datalist id="baseurl-suggestions">
+              {editForm.providerType === 'mirage' && <option value="http://127.0.0.1:8088/v1" />}
               {editForm.providerType === 'openrouter' && <option value="https://openrouter.ai/api/v1" />}
               {editForm.providerType === 'groq' && <option value="https://api.groq.com/openai/v1" />}
               {editForm.providerType === 'local' && <option value="http://localhost:11434/v1" />}

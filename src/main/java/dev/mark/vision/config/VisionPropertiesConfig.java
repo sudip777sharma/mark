@@ -49,7 +49,7 @@ public class VisionPropertiesConfig {
 
     public static class MirageProperties {
         private String baseUrl = "http://localhost:8088/v1";
-        private String model = "mirage-22mb";
+        private String model = "mirage";
         private int timeoutMs = 3000;
 
         public String getBaseUrl() {

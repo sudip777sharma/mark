@@ -375,6 +375,11 @@ export const GoalPromptBar: React.FC = () => {
                 <option value="gemini-3.1-pro" style={{ background: 'var(--bg-card)' }}>gemini-3.1-pro</option>
               </>
             )}
+            {configs.find(c => c.configName === activeProvider)?.providerType === 'mirage' && (
+              <>
+                <option value="mirage" style={{ background: 'var(--bg-card)' }}>mirage</option>
+              </>
+            )}
           </select>
         </div>
 

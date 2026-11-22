@@ -285,6 +285,7 @@ public class LlmRouterService implements LlmProviderService {
             case "groq" -> "https://api.groq.com/openai/v1";
             case "openrouter" -> "https://openrouter.ai/api/v1";
             case "local" -> "http://localhost:11434/v1";
+            case "mirage" -> "http://localhost:8088/v1";
             default -> "https://api.openai.com/v1";
         };
     }

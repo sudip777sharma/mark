@@ -56,18 +56,38 @@ public class LlmSettingsService {
                 log.info("Initialized default Local Qwen3-VL Vision provider: http://localhost:11434/v1 (model: qwen3-vl:2b)");
             }
 
-            if (repository.findByConfigName("Mirage VLM (Local Edge Vision)").isEmpty()) {
+            Optional<LlmProviderConfig> existingMirage = repository.findByConfigName("Mirage VLM (Local Edge Vision)");
+            if (existingMirage.isEmpty()) {
                 LlmProviderConfig mirageConfig = new LlmProviderConfig(
                         "Mirage VLM (Local Edge Vision)",
                         "mirage",
-                        "mirage-22mb",
+                        "mirage",
                         "http://localhost:8088/v1",
                         false,
                         List.of(new ApiKeyEntry("local", "mirage", true))
                 );
                 mirageConfig.setConfigured(true);
                 repository.save(mirageConfig);
-                log.info("Initialized default Local Mirage VLM provider: http://localhost:8088/v1 (model: mirage-22mb)");
+                log.info("Initialized default Local Mirage VLM provider: http://localhost:8088/v1 (model: mirage)");
+            } else {
+                LlmProviderConfig mc = existingMirage.get();
+                boolean updated = false;
+                if (!"mirage".equals(mc.getActiveModel())) {
+                    mc.setActiveModel("mirage");
+                    updated = true;
+                }
+                if (!"mirage".equalsIgnoreCase(mc.getProviderType())) {
+                    mc.setProviderType("mirage");
+                    updated = true;
+                }
+                if (mc.getBaseUrl() == null || mc.getBaseUrl().isBlank() || mc.getBaseUrl().contains("gemini")) {
+                    mc.setBaseUrl("http://localhost:8088/v1");
+                    updated = true;
+                }
+                if (updated) {
+                    repository.save(mc);
+                    log.info("Updated existing Mirage VLM config to providerType 'mirage', activeModel 'mirage', and baseUrl 'http://localhost:8088/v1'");
+                }
             }
         } catch (Exception e) {
             log.warn("Notice during Ollama default config initialization: {}", e.getMessage());

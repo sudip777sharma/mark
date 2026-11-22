@@ -27,7 +27,7 @@ mark:
     secondary-model: qwen3-vl
     mirage:
       base-url: "http://localhost:8088/v1"
-      model: "mirage-22mb"
+      model: "mirage"
       timeout-ms: 3000
     qwen:
       base-url: "http://localhost:11434/v1"
