@@ -100,12 +100,18 @@ public class BrowserTypeTool implements Tool {
             
             page.fill(targetSelector, text);
             
-            try { Thread.sleep(500); } catch (Exception ignored) {}
+            try { Thread.sleep(300); } catch (Exception ignored) {}
             
+            String actualVal = "";
+            try {
+                actualVal = page.inputValue(targetSelector);
+            } catch (Exception ignored) {}
+
+            boolean verified = actualVal != null && actualVal.contains(text);
             return new ToolResultDTO(true, 
                 "Successfully typed text into element matching selector: " + selector + "\n" +
-                "[Verification] Text entered successfully.", 
-                Map.of());
+                "[Verification] Value verified in element: '" + actualVal + "' (verified=" + verified + ")", 
+                Map.of("selector", targetSelector, "typed_text", text, "actual_value", actualVal != null ? actualVal : "", "verified", verified));
         } catch (Exception e) {
             return new ToolResultDTO(false, "Failed to type into element '" + selector + "': " + e.getMessage() + "\n(Hint: If Playwright says 'intercepts pointer events', a modal or loading spinner is covering the element. Use browser_inspect to see the Accessibility Tree.)", Map.of());
         }

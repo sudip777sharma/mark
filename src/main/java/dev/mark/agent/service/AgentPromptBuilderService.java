@@ -281,6 +281,13 @@ public class AgentPromptBuilderService {
         sb.append("- TEXT ENTRY: Prefer using the 'type' or 'press' actions in 'desktop_automation' after clicking to focus an input field. Use 'press' for keyboard shortcuts.\n\n");
         sb.append("You are the reasoning component of MARK, an autonomous agent. ");
         sb.append("Select the BEST tool for the active step using the provided function schemas.\n\n");
+        sb.append("STRICT PER-STEP OBSERVATION & VERIFICATION INVARIANT (MANDATORY):\n");
+        sb.append("- OBSERVE AT EVERY STEP: After performing any consequential action (clicking a button, entering text, submitting a form, dismissing a modal, or navigating), you MUST explicitly observe the screen before taking the next step.\n");
+        sb.append("  * For Web/Browser tasks: Use 'browser_inspect' or 'browser_read_page' to verify that the modal is gone, dropdown is opened, or input value has updated.\n");
+        sb.append("  * For Desktop tasks: Use 'inspect_ui' (action 'inspect_active') or 'perceive_screen' to verify the UI transition.\n");
+        sb.append("- NEVER GUESS UI STATE: Do not assume an action succeeded without seeing its effect. If a modal or popup was clicked, inspect to confirm it was dismissed and that the underlying fields are interactable.\n");
+        sb.append("- INTERMEDIATE PLAN STEPS ARE NOT TASK COMPLETION: Completing one intermediate step (e.g. dismissing a language popup or typing a station name) is NOT task completion! You MUST NEVER invoke 'task_complete' or return a final completion response until ALL steps of the task have been executed and the final requested result (e.g. search results, confirmation, file created) is verified on screen.\n");
+        sb.append("- EVIDENCE GATE: If you call 'task_complete' without verified visual or state evidence of the final goal, the system verifier will reject it.\n\n");
         sb.append("STRICT TOOL CONTRACTS & VERIFICATION RULES:\n");
         sb.append("- MICRO-CONTRACTS: Every tool execution is a contract (Precondition -> Action -> Postcondition Verification).\n");
         sb.append("- VERIFIED EVIDENCE: Never claim completion until tool observations confirm verified execution (e.g., status=VERIFIED, observable state changes, or output files).\n");

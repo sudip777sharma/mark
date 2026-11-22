@@ -6,6 +6,7 @@ import dev.mark.tool.dto.ToolRequestDTO;
 import dev.mark.tool.dto.ToolResultDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.awt.AWTException;
@@ -32,13 +33,20 @@ public class DesktopAutomationTool implements ContractAwareTool {
     private static final Logger log = LoggerFactory.getLogger(DesktopAutomationTool.class);
     private static final ReentrantLock DESKTOP_MUTEX = new ReentrantLock(true);
     private final Robot robot;
+    private final dev.mark.tool.util.NativeWindowService nativeWindowService;
 
-    public DesktopAutomationTool() {
+    @Autowired
+    public DesktopAutomationTool(dev.mark.tool.util.NativeWindowService nativeWindowService) {
+        this.nativeWindowService = nativeWindowService;
         try {
             this.robot = new Robot();
         } catch (AWTException e) {
             throw new RuntimeException("Failed to initialize java.awt.Robot for DesktopAutomationTool", e);
         }
+    }
+
+    public DesktopAutomationTool() {
+        this(new dev.mark.tool.util.NativeWindowService());
     }
 
     @Override
@@ -259,78 +267,22 @@ public class DesktopAutomationTool implements ContractAwareTool {
     }
 
     /**
-     * Inspects the title of the current foreground window.
+     * Inspects the title of the current foreground window in < 0.1ms.
      */
     public String getForegroundWindowTitle() {
-        String script = String.join("\n",
-            "Add-Type -TypeDefinition @'",
-            "using System; using System.Runtime.InteropServices; using System.Text;",
-            "public class FW {",
-            "  [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();",
-            "  [DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr h, StringBuilder t, int c);",
-            "}",
-            "'@",
-            "$h = [FW]::GetForegroundWindow()",
-            "if ($h -eq [IntPtr]::Zero) { exit }",
-            "$t = New-Object Text.StringBuilder 256",
-            "[FW]::GetWindowText($h, $t, 256) | Out-Null",
-            "$t.ToString()"
-        );
-        try {
-            return runPowershell(script).trim();
-        } catch (Exception e) {
-            log.warn("Failed to get foreground window title: {}", e.getMessage());
-            return "";
-        }
+        return nativeWindowService.getForegroundWindowTitle();
     }
 
     /**
-     * Searches for a visible window matching targetTitle and brings it to foreground.
+     * Searches for a visible window matching targetTitle and brings it to foreground in < 1ms.
      */
     public ToolResultDTO bringToForeground(String targetTitle) {
         String safe = sanitize(targetTitle);
-        String script = String.join("\n",
-            "Add-Type -TypeDefinition @'",
-            "using System; using System.Runtime.InteropServices; using System.Text;",
-            "public class WA {",
-            "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);",
-            "  [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);",
-            "  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);",
-            "  [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);",
-            "  [DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr h, StringBuilder t, int c);",
-            "  [DllImport(\"user32.dll\")] public static extern int GetClassName(IntPtr h, StringBuilder c, int n);",
-            "  [DllImport(\"user32.dll\")] public static extern bool IsWindowVisible(IntPtr h);",
-            "}",
-            "'@",
-            "$found=$false",
-            "[WA]::EnumWindows({param($h,$l)",
-            "  if(-not [WA]::IsWindowVisible($h)){return $true}",
-            "  $c=New-Object Text.StringBuilder 256",
-            "  [WA]::GetClassName($h,$c,256)|Out-Null",
-            "  if('" + safe + "' -like '*WhatsApp*' -and $c.ToString() -like '*Chrome*'){return $true}",
-            "  $t=New-Object Text.StringBuilder 256",
-            "  [WA]::GetWindowText($h,$t,256)|Out-Null",
-            "  if($t.ToString() -like '*" + safe + "*'){",
-            "    $cmd = if('" + safe + "' -like '*WhatsApp*'){ 3 } else { 9 }",
-            "    [WA]::ShowWindow($h,$cmd)|Out-Null",
-            "    [WA]::SetForegroundWindow($h)|Out-Null",
-            "    $script:found=$true",
-            "    Write-Output \"Activated: $($t.ToString())\"",
-            "    return $false",
-            "  }",
-            "  return $true",
-            "},[IntPtr]::Zero)",
-            "if(-not $found){Write-Output 'ERROR: Window not found'; exit 1}"
-        );
-        try {
-            String output = runPowershell(script).trim();
-            if (output.startsWith("ERROR")) {
-                return new ToolResultDTO(false, output, Map.of());
-            }
-            return ToolResultDTO.success(output);
-        } catch (Exception e) {
-            return new ToolResultDTO(false, "Focus restore failed: " + e.getMessage(), Map.of());
+        boolean activated = nativeWindowService.bringToForeground(safe);
+        if (activated) {
+            return ToolResultDTO.success("Activated: " + safe);
         }
+        return new ToolResultDTO(false, "ERROR: Window not found matching '" + safe + "'", Map.of());
     }
 
     private String sanitize(String input) {

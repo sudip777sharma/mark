@@ -56,6 +56,9 @@ public class BrowserClickTool implements Tool {
 
         try {
             var page = browserSession.getCurrentPage();
+            browserSession.bringBrowserWindowToForeground();
+            
+            String preUrl = page.url();
             
             // Wait for element to be visible
             page.waitForSelector(selector, new com.microsoft.playwright.Page.WaitForSelectorOptions().setState(com.microsoft.playwright.options.WaitForSelectorState.VISIBLE));
@@ -63,17 +66,25 @@ public class BrowserClickTool implements Tool {
             page.click(selector);
             
             // Brief wait for any immediate UI reactions
-            try { Thread.sleep(1000); } catch (Exception ignored) {}
+            try { Thread.sleep(500); } catch (Exception ignored) {}
             
             String postUrl = page.url();
             String title = page.title();
+            boolean urlChanged = !postUrl.equals(preUrl);
+            boolean elementDetached = false;
+            try {
+                elementDetached = page.locator(selector).count() == 0 || !page.locator(selector).first().isVisible();
+            } catch (Exception ignored) {}
+
+            boolean verified = urlChanged || elementDetached;
             
             return new ToolResultDTO(true, 
                 "Successfully clicked element matching selector: " + selector + "\n" +
-                "[Verification] Current URL: " + postUrl + "\n" +
+                "[Verification] Current URL: " + postUrl + (urlChanged ? " (Navigation observed)" : "") + "\n" +
                 "[Verification] Page Title: " + title + "\n" +
-                "(If the URL or Title didn't change as expected, the click might have been intercepted by a modal. Use browser_inspect to check.)", 
-                Map.of());
+                (elementDetached ? "[Verification] Clicked element/modal was dismissed or detached.\n" : "") +
+                "(If the URL or Title didn't change as expected, use browser_inspect to observe updated page state.)", 
+                Map.of("url", postUrl, "title", title, "url_changed", urlChanged, "element_closed", elementDetached, "verified", verified));
         } catch (Exception e) {
             return new ToolResultDTO(false, "Failed to click element '" + selector + "': " + e.getMessage() + "\n(Hint: If Playwright says 'intercepts pointer events', a modal or loading spinner is covering the element. Use browser_inspect to see the Accessibility Tree and find the blocking element.)", Map.of());
         }

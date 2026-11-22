@@ -19,13 +19,20 @@ public class BrowserSession implements AutoCloseable {
 
     private final BrowserPropertiesConfig properties;
     private final dev.mark.preference.UserPreferenceService userPreferenceService;
+    private final NativeWindowService nativeWindowService;
     private Playwright playwright;
     private BrowserContext browserContext;
     private Page currentPage;
 
-    public BrowserSession(dev.mark.preference.UserPreferenceService userPreferenceService, BrowserPropertiesConfig properties) {
+    @Autowired
+    public BrowserSession(dev.mark.preference.UserPreferenceService userPreferenceService, BrowserPropertiesConfig properties, NativeWindowService nativeWindowService) {
         this.userPreferenceService = userPreferenceService;
         this.properties = properties;
+        this.nativeWindowService = nativeWindowService;
+    }
+
+    public BrowserSession(dev.mark.preference.UserPreferenceService userPreferenceService, BrowserPropertiesConfig properties) {
+        this(userPreferenceService, properties, new NativeWindowService());
     }
 
     @PostConstruct
@@ -80,6 +87,7 @@ public class BrowserSession implements AutoCloseable {
             if (this.currentPage != null && !this.currentPage.isClosed()) {
                 try {
                     this.currentPage.bringToFront();
+                    bringBrowserWindowToForeground();
                 } catch (Exception ignored) {}
             }
             return this.currentPage;
@@ -92,9 +100,24 @@ public class BrowserSession implements AutoCloseable {
             if (this.currentPage != null && !this.currentPage.isClosed()) {
                 try {
                     this.currentPage.bringToFront();
+                    bringBrowserWindowToForeground();
                 } catch (Exception ignored) {}
             }
             return this.currentPage;
+        }
+    }
+
+    public void bringBrowserWindowToForeground() {
+        if (nativeWindowService != null && !userPreferenceService.getBoolean("browser.headless", properties.headless())) {
+            try {
+                String title = currentPage != null && !currentPage.isClosed() ? currentPage.title() : null;
+                if (title != null && !title.isBlank() && !title.equals("about:blank")) {
+                    if (nativeWindowService.bringToForeground(title)) {
+                        return;
+                    }
+                }
+                nativeWindowService.bringToForeground("Chrome");
+            } catch (Exception ignored) {}
         }
     }
 

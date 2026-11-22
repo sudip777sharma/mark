@@ -101,7 +101,8 @@ public class AgentCompletionVerifierService {
             return success(goal, "completion matches the requested environment observation");
         }
 
-        return failure(goal, "Completion is not supported by available evidence. Non-consequential inspection tools alone do not verify task completion.");
+        return failure(goal, "Completion is not supported by available evidence. Non-consequential inspection tools alone do not verify task completion. "
+                + "Do not call task_complete prematurely. You must observe the screen, execute the required pending action steps for '" + goal + "', and verify the final outcome before completing.");
     }
 
     private AgentVerificationResultModel verifyMultiActionGoal(

@@ -20,7 +20,7 @@ public interface PostconditionCheck {
         }
 
         public static PostconditionResult notApplicable() {
-            return new PostconditionResult(true, "Not applicable for read-only tool", Map.of("verified", true));
+            return new PostconditionResult(false, "Not applicable for unverified or read-only tool", Map.of("verified", false));
         }
     }
 

@@ -41,10 +41,12 @@ public class ScreenshotTool implements ContractAwareTool {
     private static final Logger log = LoggerFactory.getLogger(ScreenshotTool.class);
     private final Robot robot;
     private final ScreenshotCacheService cacheService;
+    private final dev.mark.tool.util.NativeWindowService nativeWindowService;
 
     @Autowired
-    public ScreenshotTool(ScreenshotCacheService cacheService) {
+    public ScreenshotTool(ScreenshotCacheService cacheService, dev.mark.tool.util.NativeWindowService nativeWindowService) {
         this.cacheService = cacheService;
+        this.nativeWindowService = nativeWindowService;
         try {
             this.robot = new Robot();
         } catch (AWTException e) {
@@ -52,8 +54,12 @@ public class ScreenshotTool implements ContractAwareTool {
         }
     }
 
+    public ScreenshotTool(ScreenshotCacheService cacheService) {
+        this(cacheService, new dev.mark.tool.util.NativeWindowService());
+    }
+
     public ScreenshotTool() {
-        this(new ScreenshotCacheService());
+        this(new ScreenshotCacheService(), new dev.mark.tool.util.NativeWindowService());
     }
 
     @Override
@@ -72,6 +78,7 @@ public class ScreenshotTool implements ContractAwareTool {
         return Map.of(
                 "type", "object",
                 "properties", Map.of(
+                        "target_app", Map.of("type", "string", "description", "Optional window title or application name to activate/bring to foreground before capture"),
                         "file_path", Map.of("type", "string", "description", "Optional output PNG path. Defaults to mark-workspace/screenshots/screenshot_<uuid>.png"),
                         "x", Map.of("type", "integer", "description", "Optional sub-region X coordinate"),
                         "y", Map.of("type", "integer", "description", "Optional sub-region Y coordinate"),
@@ -89,6 +96,7 @@ public class ScreenshotTool implements ContractAwareTool {
                 .risk(ToolRiskClassification.READ_ONLY)
                 .idempotency(IdempotencyPolicy.NATURALLY_IDEMPOTENT)
                 .timeoutMs(15_000L)
+                .parameter(ToolParameterSchema.optionalString("target_app", "Window title or application to activate before capture", null))
                 .parameter(ToolParameterSchema.optionalString("file_path", "Destination PNG file path", null))
                 .parameter(ToolParameterSchema.optionalInt("x", "Crop region X", null))
                 .parameter(ToolParameterSchema.optionalInt("y", "Crop region Y", null))
@@ -100,6 +108,17 @@ public class ScreenshotTool implements ContractAwareTool {
     @Override
     public ToolResultDTO execute(ToolRequestDTO request) {
         Map<String, Object> args = request.arguments();
+        String targetApp = args.get("target_app") != null ? args.get("target_app").toString().trim() : null;
+        if (targetApp != null && !targetApp.isBlank() && nativeWindowService != null) {
+            log.info("screenshot bringing '{}' to foreground before capture", targetApp);
+            nativeWindowService.bringToForeground(targetApp);
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
         String requestedPath = args.get("file_path") != null ? args.get("file_path").toString().trim() : null;
 
         GraphicsDevice gd = GraphicsEnvironment.getLocalGraphicsEnvironment().getDefaultScreenDevice();

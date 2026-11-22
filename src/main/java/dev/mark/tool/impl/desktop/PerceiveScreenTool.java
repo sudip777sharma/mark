@@ -38,17 +38,23 @@ public class PerceiveScreenTool implements ContractAwareTool {
     private final ScreenshotTool screenshotTool;
     private final ScreenshotCacheService screenshotCache;
     private final DesktopAutomationTool desktopTool;
+    private final dev.mark.tool.util.BrowserSession browserSession;
 
     public PerceiveScreenTool(VisionEngineService visionEngine, ScreenshotTool screenshotTool, ScreenshotCacheService screenshotCache) {
-        this(visionEngine, screenshotTool, screenshotCache, null);
+        this(visionEngine, screenshotTool, screenshotCache, null, null);
+    }
+
+    public PerceiveScreenTool(VisionEngineService visionEngine, ScreenshotTool screenshotTool, ScreenshotCacheService screenshotCache, DesktopAutomationTool desktopTool) {
+        this(visionEngine, screenshotTool, screenshotCache, desktopTool, null);
     }
 
     @Autowired
-    public PerceiveScreenTool(VisionEngineService visionEngine, ScreenshotTool screenshotTool, ScreenshotCacheService screenshotCache, DesktopAutomationTool desktopTool) {
+    public PerceiveScreenTool(VisionEngineService visionEngine, ScreenshotTool screenshotTool, ScreenshotCacheService screenshotCache, DesktopAutomationTool desktopTool, dev.mark.tool.util.BrowserSession browserSession) {
         this.visionEngine = visionEngine;
         this.screenshotTool = screenshotTool;
         this.screenshotCache = screenshotCache;
         this.desktopTool = desktopTool;
+        this.browserSession = browserSession;
     }
 
     @Override
@@ -99,7 +105,15 @@ public class PerceiveScreenTool implements ContractAwareTool {
             log.info("perceive_screen bringing '{}' to foreground before capture", targetApp);
             desktopTool.bringToForeground(targetApp);
             try {
-                Thread.sleep(400);
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        } else if (browserSession != null && browserSession.hasActivePage()) {
+            log.info("perceive_screen bringing active browser window to foreground before capture");
+            browserSession.bringBrowserWindowToForeground();
+            try {
+                Thread.sleep(100);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }

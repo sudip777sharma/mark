@@ -57,7 +57,7 @@ public record ToolContract(
         private IdempotencyPolicy idempotencyPolicy = IdempotencyPolicy.NATURALLY_IDEMPOTENT;
         private long timeoutMs = 30_000L;
         private final List<PreconditionCheck> preconditions = new ArrayList<>();
-        private PostconditionCheck postconditionCheck = (req, res) -> PostconditionCheck.PostconditionResult.notApplicable();
+        private PostconditionCheck postconditionCheck = null;
         private boolean allowUnknownParameters = false;
 
         public Builder(String toolName) {
